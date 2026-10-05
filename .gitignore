@@ -427,3 +427,12 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Local SDK and test databases
+.tools/
+*.db3
+*.db3-*
+
+**/bin-next/
+
+**/bin-reports/
