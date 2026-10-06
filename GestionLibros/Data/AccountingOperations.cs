@@ -5,12 +5,13 @@ public sealed partial class AppDatabase
  public async Task UpdateAccount(int companyId, int id, string description)
  {
   RequireCompany(companyId);
+  var user = RequireSession();
   description = description.Trim();
   if (description.Length == 0 || description.Length > 200) throw new InvalidOperationException("Escriba una descripción de hasta 200 caracteres.");
   await db.RunInTransactionAsync(c => {
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
-   account.Description = description; c.Update(account);
+   account.Description = description; account.ChangedBy = user.Username; account.ChangedAt = DateTime.Now; account.Status = "C"; c.Update(account);
   });
  }
  public async Task DeleteAccount(int companyId, int id)
@@ -19,7 +20,7 @@ public sealed partial class AppDatabase
   await db.RunInTransactionAsync(c => {
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
-   if (c.Table<Account>().Any(a => a.CompanyId == companyId && a.ParentCode == account.Code) || c.Table<JournalLine>().Any(l => l.AccountId == id)) throw new InvalidOperationException("No puede borrar una cuenta con subcuentas o movimientos.");
+   if (c.Table<Account>().Any(a => a.CompanyId == companyId && a.ParentCode == account.Code) || c.Table<JournalLine>().Any(l => l.AccountId == id) || c.Table<ImportedBalance>().Any(b => b.AccountId == id)) throw new InvalidOperationException("No puede borrar una cuenta con subcuentas, movimientos o saldos importados.");
    c.Delete(account);
   });
  }
@@ -27,6 +28,12 @@ public sealed partial class AppDatabase
  {
   RequireCompany(companyId);
   return db.Table<Journal>().Where(j => j.CompanyId == companyId && j.Year == year && j.Month == month).OrderBy(j => j.Date).ThenBy(j => j.Reference).ToListAsync();
+ }
+ // Whole fiscal year in one query (tabs Numero/Mes and the type lookup used to run 12).
+ public Task<List<Journal>> JournalsOfYear(int companyId, int year)
+ {
+  RequireCompany(companyId);
+  return db.Table<Journal>().Where(j => j.CompanyId == companyId && j.Year == year).OrderBy(j => j.Date).ThenBy(j => j.Reference).ToListAsync();
  }
  public async Task<List<JournalLine>> Lines(int companyId, int journalId)
  {

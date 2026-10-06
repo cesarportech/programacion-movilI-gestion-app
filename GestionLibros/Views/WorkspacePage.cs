@@ -23,8 +23,8 @@ public class WorkspacePage : AccountingPage
         months.ItemsSource = Enumerable.Range(1, 12).Select(x => x.ToString("00")).ToList();
         months.SelectedIndex = DateTime.Today.Month - 1;
         year.Text = DateTime.Today.Year.ToString();
-        AutomationProperties.SetName(months, "Mes de trabajo");
-        AutomationProperties.SetName(year, "Año de trabajo");
+        SemanticProperties.SetDescription(months, "Mes de trabajo");
+        SemanticProperties.SetDescription(year, "Año de trabajo");
         ClassicWorkspaceChrome.CompactPeriod(months, year);
 
         Gl2000Chrome.ApplyMenus(this, Open);
@@ -32,7 +32,7 @@ public class WorkspacePage : AccountingPage
         archivos.Insert(0, new MenuFlyoutItem { Text = "Seleccionar contabilidad…",
             Command = new Command(async () => await Guard(SelectCompany)) });
         var exit = archivos.OfType<MenuFlyoutItem>().First(x => x.Text == "Salir");
-        exit.Command = new Command(Logout);
+        exit.Command = new Command(CloseApp);
         var menu = ClassicWorkspaceChrome.Menu(this, MenuBarItems.ToArray());
         // One compact menu row, without the NavigationPage heading.
         MenuBarItems.Clear();
@@ -40,12 +40,13 @@ public class WorkspacePage : AccountingPage
         var tools = new HorizontalStackLayout { Spacing = 1, Padding = new Thickness(3, 2, 0, 0) };
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Catálogo", "gl_catalog.png", () => Open("catalog")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Asientos", "gl_journals.png", () => Open("journals")));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Acumular", "gl_accumulate.png", () => DisplayAlertAsync("Aviso", "Acumular Saldos no está disponible en esta versión de prueba.", "Entendido")));
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Acumular", "gl_accumulate.png", () => MenuActions.Accumulate(this)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Consulta", "gl_query.png", () => Open("balances")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Balanza", "gl_trial.png", () => Open("trial")));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Saldos", "gl_balances.png", () => Open("balances")));
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Saldos", "gl_balances.png", () => Open("saldos")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Mayor", "gl_ledger.png", () => Open("ledger")));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Salir", "gl_exit.png", () => { Logout(); return Task.CompletedTask; }));
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Salir", "gl_exit.png", () => { CloseApp(); return Task.CompletedTask; }));
+        tools.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => SessionActions.SignOut(this, db)));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
         period.Children.Add(ClassicWorkspaceChrome.Text("Mes", true));
         period.Children.Add(months);
@@ -104,19 +105,29 @@ public class WorkspacePage : AccountingPage
         UpdateTitle();
     }
 
-    private void Logout() { db.Logout(); Window!.Page = new LoginPage(db); }
+    // Salir: closes the program like the GL2000, keeping the session for the next start.
+    private void CloseApp()
+    {
+#if WINDOWS || MACCATALYST
+        if (Window != null) Application.Current?.CloseWindow(Window);
+#else
+        Application.Current?.Quit();
+#endif
+    }
 
     private Task Open(string page) => Guard(async () =>
     {
+        if (page == "logout") { await SessionActions.SignOut(this, db); return; }
         if (page == "admin") { await Navigation.PushAsync(new AdminPage(db)); return; }
         if (company == null) throw new InvalidOperationException("Seleccione o cree una contabilidad.");
         if (!int.TryParse(year.Text, out var y) || y < 1900 || y > 2100)
             throw new InvalidOperationException("Indique un año entre 1900 y 2100.");
         var m = months.SelectedIndex + 1;
         if (m < 1 || m > 12) throw new InvalidOperationException("Seleccione un mes.");
+        // Reports, utilities and notices open on top of this screen.
+        if (await MenuActions.TryRun(this, db, company, y, m, page)) return;
         await Navigation.PushAsync(page switch {
-            "catalog" => new CatalogPage(db, company), "journals" => new JournalsPage(db, company, y, m),
-            "trial" => new TrialBalancePage(db, company, y, m), "ledger" => new LedgerPage(db, company, y, m),
+            "catalog" => new CatalogPage(db, company, y, m), "journals" => new JournalsPage(db, company, y, m),
             _ => new BalancesPage(db, company, y, m) });
     });
 }

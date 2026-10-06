@@ -36,7 +36,23 @@ Las tablas amarillas, encabezados azules, formularios verdes, nombres y organiza
 
 La base se guarda en FileSystem.AppDataDirectory. Diferentes usuarios de la aplicación comparten datos en la misma instalación y perfil de Windows. Otros equipos o perfiles tienen bases independientes. No compartir SQLite por red. La API y base central son necesarias para uso distribuido. Quien tenga acceso al archivo local puede leerlo directamente.
 
-Contraseñas con PBKDF2 SHA-256 y sal aleatoria. No hay contraseñas predeterminadas. No se importan datos ni se modifica C:/Sistemas.
+Sesión recordada: al iniciar sesión se crea un token aleatorio de 256 bits. El equipo lo guarda en SecureStorage (en Windows, cifrado para el usuario de Windows) y la base solo guarda su SHA-256 (tabla SessionToken). Cerrar la ventana o Salir conserva la sesión; Archivos → Cerrar Sesión borra el token del equipo y de la base. El token no caduca por tiempo.
+
+Contraseñas con PBKDF2 SHA-256 y sal aleatoria. No hay contraseñas predeterminadas. C:/Sistemas nunca se modifica.
+
+## Importar el catálogo del GL2000
+
+Utilerías → Importar Catálogo GL2000 lista los catálogos CAT<empresa><año>.Tps que encuentra en C:\Sistemas\Datos (o permite elegir otro archivo) y copia sus cuentas a la contabilidad activa. Los archivos .Tps se abren solo para lectura con un lector TopSpeed propio (GestionLibros/Data/Import).
+
+- Se importan cuenta, cuenta superior, descripción, fecha de cambio, usuario y status (C = cambiada).
+- Las cuentas que ya existen en FREDI se conservan sin cambios; repetir la importación solo agrega las faltantes.
+- Todo se guarda en una transacción: si una cuenta no tiene superior o cae bajo una cuenta con movimientos, no se importa nada.
+- El nivel del GL2000 empieza en 0; en FREDI la primera cuenta es nivel 1.
+- Con catálogos de un ejercicio (CAT<empresa><año>.Tps) también se importan los acumulados: saldo inicial del año y cargos/créditos de cada mes (tabla ImportedBalance). Reimportar el mismo año reemplaza esos acumulados. Los catálogos plantilla (CATEMP…) solo traen cuentas.
+- Consulta y Balanza suman los acumulados del último ejercicio importado (≤ año consultado) a los movimientos capturados en FREDI. Saldo inicial del mes = saldo inicial del año + meses anteriores.
+- Cada cuenta importada muestra su propio acumulado del GL, también las superiores, porque el GL no siempre mantiene una cuenta superior igual a la suma de sus subcuentas (p. ej. 1.14900 en la empresa 003). Las superiores sin acumulado propio suman a sus subcuentas.
+- El Mayor todavía solo muestra movimientos capturados en FREDI; no incluye los acumulados importados.
+- No se importan las pólizas del GL2000. Empresas.Tps está cifrado y no se lee.
 
 ## Ejecutar
 
@@ -46,7 +62,7 @@ Desde esta carpeta:
 .\Iniciar-Fredi.ps1
 ```
 
-El script usa el SDK .NET 10 local de .tools y compila en GestionLibros/bin-reports para no sobrescribir el ejecutable anterior si continúa abierto. Cierre la versión anterior antes de trabajar con la nueva. No se deben editar las mismas pólizas desde varias instancias simultáneas en esta fase.
+El script usa el SDK .NET 10 local de .tools, cierra la copia de FREDI que esté abierta y compila siempre en GestionLibros/bin-detalles. No se deben editar las mismas pólizas desde varias instancias simultáneas en esta fase.
 
 ```powershell
 .\.tools\dotnet\dotnet.exe run --project Tests/Fredi.Checks.csproj
@@ -58,7 +74,9 @@ Compilación Windows .NET 10: 0 errores y 0 advertencias. Comprobaciones automat
 
 ## Pendientes
 
-Validar reglas con el programa antiguo, historial por ejercicio, permisos más finos, concurrencia, auditoría completa, cambios/baja de usuarios, recuperación de contraseña, duplicar pólizas, IVA, bancos, conciliación, acumulación formal, cierre anual, balance general, estado de resultados, comparativo anual, importación de saldos e importación TPS. No se ejecuta un cierre ni se simula la migración.
+Implementado: Tipos de Pólizas, Duplicar, Impresión de Pólizas, Balance General, Estado de Resultados (mes y acumulado), Sistema de Respaldos, Importar / Exportar Catálogo CSV, Usuarios Conectados e importación del catálogo y acumulados del GL2000. Acumular Saldos no es necesario (los saldos se calculan al consultar).
+
+Pendiente: importar las pólizas del GL2000 (POL/ASI), módulo de bancos y cheques (maestro, captura, impresión, cancelación, conciliación), centros de costo, departamentos, conceptos, cierre anual, comparativo anual, utilerías de mantenimiento de pólizas (renumerar, traspasar, concentrar, arreglar fechas), saldos iniciales, cambios/baja de usuarios, recuperación de contraseña, validar reglas con el programa antiguo y concurrencia entre equipos.
 
 
 ## Reportes y exportaciones

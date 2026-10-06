@@ -40,8 +40,7 @@ public class AccountingPage : ContentPage
  protected readonly VerticalStackLayout Body = new() { Spacing = 10, Padding = 16 };
  protected readonly Label Notice = new() { TextColor = Colors.DarkRed };
 
- // Chrome-less constructor, kept for lightweight popups (e.g. MovementEditor) that float over a parent window
- // in the original and never showed the menu/toolbar/status bar themselves.
+ // Chrome-less constructor: classic pages call it and then replace Content with their own frame.
  protected AccountingPage(string title, string? texture = null)
  {
   Title = title; BackgroundColor = Color.FromArgb("#E9E9DF");
@@ -74,5 +73,8 @@ public class AccountingPage : ContentPage
   Content = layout;
  }
 
- protected async Task Guard(Func<Task> work) { if (!Content.IsEnabled) return; Content.IsEnabled = false; Notice.Text = ""; try { await work(); } catch (InvalidOperationException ex) { Notice.Text = ex.Message; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo completar la operación. Revise los datos e inténtelo nuevamente."; } finally { Content.IsEnabled = true; } }
+ // Runs one operation at a time. A flag instead of Content.IsEnabled: disabling the page cascaded
+ // through every control on each query, which made pages slow to respond.
+ private bool working;
+ protected async Task Guard(Func<Task> work) { if (working) return; working = true; Notice.Text = ""; try { await work(); } catch (InvalidOperationException ex) { Notice.Text = ex.Message; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo completar la operación. Revise los datos e inténtelo nuevamente."; } finally { working = false; } }
 }

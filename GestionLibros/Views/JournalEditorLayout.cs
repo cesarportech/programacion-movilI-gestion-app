@@ -4,6 +4,8 @@ namespace GestionLibros.Views;
 
 public partial class JournalEditor
 {
+    private readonly Label typeName = ClassicWorkspaceChrome.Text("", true);
+    private List<PolicyType> policyTypes = [];
     private readonly Label debitTotal = BlueText("0.00");
     private readonly Label creditTotal = BlueText("0.00");
     private static readonly int[] MovementWidths = [58, 175, 171, 97, 98];
@@ -25,8 +27,9 @@ public partial class JournalEditor
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
             ("Asientos", "gl_journals.png", "journals"), ("Acumular", "gl_accumulate.png", "accumulate"),
             ("Consulta", "gl_query.png", "balances"), ("Balanza", "gl_trial.png", "trial"),
-            ("Saldos", "gl_balances.png", "balances"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
+            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
             tools.Children.Add(ClassicWorkspaceChrome.Tool(caption, image, () => OpenModule(key)));
+        tools.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => OpenModule("logout")));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
         period.Children.Add(ClassicWorkspaceChrome.Text("Mes", true));
         period.Children.Add(new Border { Padding = new Thickness(3, 0), Stroke = Colors.Gray, BackgroundColor = Colors.White,
@@ -38,9 +41,11 @@ public partial class JournalEditor
         { AbsoluteLayout.SetLayoutBounds(view, new Rect(x, y, width, height)); fields.Children.Add(view); }
         foreach (var (caption, y) in new[] { ("Tipo de Póliza:", 8d), ("Referencia:", 31d), ("Fecha:", 54d), ("Concepto:", 79d) })
             Put(BlueText(caption), 10, y, 84, 20);
-        Put(CompactField(type, Gl2000Chrome.RowYellow), 94, 8, 28, 20);
-        Put(JournalsPage.ActionButton("", "gl_search.png", () => Guard(FindType), 24), 126, 6, 24, 24);
-        Put(CompactField(reference, Gl2000Chrome.RowYellow), 94, 31, 55, 20);
+        Put(CompactField(type, Gl2000Chrome.RowYellow), 94, 8, 40, 20);
+        Put(JournalsPage.ActionButton("", "gl_search.png", () => Guard(FindType), 24), 138, 6, 24, 24);
+        typeName.TextColor = Colors.Blue; Put(typeName, 168, 8, 220, 20);
+        type.TextChanged += (_, _) => ShowTypeName();
+        Put(CompactField(reference, Gl2000Chrome.RowYellow), 94, 31, 100, 20);
         date.Format = "d/M/yyyy"; date.FontFamily = "Arial"; date.FontSize = 11;
         date.TextColor = Colors.Black; date.BackgroundColor = Gl2000Chrome.RowYellow;
         date.MinimumHeightRequest = 0; date.HeightRequest = 20;
@@ -53,8 +58,8 @@ public partial class JournalEditor
 #endif
         Put(date, 94, 54, 124, 20);
         Put(CompactField(concept, Colors.White), 94, 80, 270, 20);
-        AutomationProperties.SetName(type, "Tipo de póliza"); AutomationProperties.SetName(reference, "Referencia");
-        AutomationProperties.SetName(date, "Fecha"); AutomationProperties.SetName(concept, "Concepto");
+        SemanticProperties.SetDescription(type, "Tipo de póliza"); SemanticProperties.SetDescription(reference, "Referencia");
+        SemanticProperties.SetDescription(date, "Fecha"); SemanticProperties.SetDescription(concept, "Concepto");
 
         rows.Spacing = 0; rows.Padding = 0; rows.MinimumWidthRequest = 0;
         var header = MovementColumns(); header.HeightRequest = 17; header.BackgroundColor = Colors.LightGray;
@@ -133,7 +138,7 @@ public partial class JournalEditor
             Content = new ScrollView { Orientation = ScrollOrientation.Horizontal, HorizontalScrollBarVisibility = ScrollBarVisibility.Never, Content = tools } }, 0, 1);
         frame.Add(Gl2000Chrome.Backdrop(body, "gl_card.png", 33, 31), 0, 2);
         frame.Add(ClassicWorkspaceChrome.Status(db), 0, 3);
-        Content = frame;
+        Content = new Grid { Children = { frame, movementDialog } };
         Loaded += (_, _) => { if (Window != null) ClassicWorkspaceChrome.WindowTitle(Window, Title); };
     }
 
@@ -141,15 +146,9 @@ public partial class JournalEditor
     {
         entry.Placeholder = null; entry.FontFamily = "Arial"; entry.FontSize = 11; entry.FontAutoScalingEnabled = false;
         entry.TextColor = Colors.Black; entry.BackgroundColor = background; entry.MinimumHeightRequest = 0;
-        entry.MinimumWidthRequest = 0; entry.HeightRequest = 18; entry.Margin = 0;
-#if WINDOWS
-        entry.HandlerChanged += (_, _) =>
-        {
-            if (entry.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.TextBox box)
-            { box.MinHeight = box.MinWidth = 0; box.Padding = new Microsoft.UI.Xaml.Thickness(0); box.BorderThickness = new Microsoft.UI.Xaml.Thickness(0); }
-        };
-#endif
-        return new Border { Content = entry, Padding = new Thickness(1, 0), Stroke = Colors.Gray, StrokeThickness = 1, BackgroundColor = background };
+        entry.HeightRequest = 18;
+        ClassicWorkspaceChrome.CompactEntry(entry);
+        return new Border { Content = entry, Padding = 0, Stroke = Colors.Gray, StrokeThickness = 1, BackgroundColor = background };
     }
 
     private static Grid MovementColumns()
@@ -171,22 +170,32 @@ public partial class JournalEditor
             row.Add(label, i, 0);
         }
         var tap = new TapGestureRecognizer(); tap.Tapped += (_, _) => { selected = line; Render(); }; row.GestureRecognizers.Add(tap);
+        var doubleTap = new TapGestureRecognizer { NumberOfTapsRequired = 2 };
+        doubleTap.Tapped += async (_, _) => { selected = line; Render(); await EditLine(line); };
+        row.GestureRecognizers.Add(doubleTap);
         return row;
     }
 
+    // Lists the Tipos de Pólizas catalog plus any type already used this year; picking one fills the field.
     private async Task FindType()
     {
-        var existing = new HashSet<string>();
-        for (var m = 1; m <= 12; m++) foreach (var journal in await db.Journals(company.Id, original.Date.Year, m)) existing.Add(journal.Type);
-        if (existing.Count == 0) { await DisplayAlertAsync("Tipo de póliza", "Todavía no hay tipos usados en esta contabilidad. Escriba el tipo en el campo correspondiente.", "Cerrar"); type.Focus(); return; }
-        var choice = await DisplayActionSheetAsync("Tipos usados en esta contabilidad", "Cancelar", null, existing.Order().ToArray());
-        if (existing.Contains(choice)) type.Text = choice;
+        var options = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var t in policyTypes) options[t.Code] = $"{t.Code}  {t.Description}";
+        foreach (var journal in await db.JournalsOfYear(company.Id, original.Date.Year)) options.TryAdd(journal.Type, journal.Type);
+        if (options.Count == 0) { await DisplayAlertAsync("Tipo de póliza", "No hay tipos de póliza. Agréguelos en Archivos → Tipos de Pólizas o escriba el tipo.", "Cerrar"); type.Focus(); return; }
+        var labels = options.Values.ToArray();
+        var choice = await DisplayActionSheetAsync("Tipos de Pólizas", "Cancelar", null, labels);
+        var picked = options.FirstOrDefault(o => o.Value == choice);
+        if (picked.Key != null) type.Text = picked.Key;
     }
+
+    private void ShowTypeName() =>
+        typeName.Text = policyTypes.FirstOrDefault(t => t.Code == (type.Text ?? "").Trim())?.Description ?? "";
 
     private Task OpenModule(string key) => Guard(async () =>
     {
         if (key == "exit") { await Navigation.PopAsync(); return; }
-        if (key == "accumulate") { await DisplayAlertAsync("Aviso", "Acumular Saldos no está disponible en esta versión de prueba.", "Cerrar"); return; }
+        if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
         await Gl2000Chrome.Navigate(this, db, company, original.Date.Year, original.Date.Month, key);
     });
 }

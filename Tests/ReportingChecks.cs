@@ -71,6 +71,18 @@ internal static class ReportingChecks
         Check(direct.Rows.Count == 0 && direct.Opening == 0, "Parent direct-only option excludes descendants");
         var idle = await database.Ledger(a, cash, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31));
         Check(idle.Rows.Count == 0 && idle.Opening == idle.Closing && idle.Opening == 12534, "Inactive period retains previous balance");
+        var auxiliary = await database.LedgerRange(a, 2026, 1, 1, "1", "1.99");
+        Check(auxiliary.Accounts.Select(x => x.Code).SequenceEqual(new[] { "1.01", "1.02" }), "Auxiliary ledger lists detail accounts in range only");
+        var cashLedger = auxiliary.Accounts[0];
+        Check(cashLedger.Opening == 10001 && cashLedger.Movements.Count == 2 && cashLedger.Debits == 2034 && cashLedger.Credits == 500 && cashLedger.Closing == 11535,
+            "Auxiliary ledger opening, partidas and closing per account");
+        var twoMonths = await database.LedgerRange(a, 2026, 1, 2, "1.01", "1.01");
+        Check(twoMonths.Accounts.Single().Movements.Count == 3 && twoMonths.Accounts.Single().Closing == 12534, "Auxiliary ledger spans the month range");
+        var ledgerPrint = ReportFormatter.LedgerRange(auxiliary);
+        Check(ledgerPrint.Headers.Count == 7 && ledgerPrint.Period == "Enero  -  Enero  /  2026" &&
+            ledgerPrint.Rows.Any(r => r.Cells[4].Value == "SALDO ANTERIOR:") && ledgerPrint.Rows.Any(r => r.Cells[4].Value == "Total Cargos / Créditos :") &&
+            ledgerPrint.Rows.Any(r => r.Cells[4].Value == "SALDO ACTUAL:"), "Auxiliary ledger prints in the GL Reporte de Mayor layout");
+        await Denied(async () => { await database.LedgerRange(a, 2026, 3, 1); }, "Auxiliary ledger rejects reversed months");
         await Denied(async () => { await database.TrialBalance(a, 2026, 1, 10); }, "Invalid level rejected");
         await Denied(async () => { await database.TrialBalance(a, 2026, 13); }, "Invalid month rejected");
         await Denied(async () => { await database.Ledger(a, cash, new DateTime(2026, 2, 1), new DateTime(2026, 1, 1)); }, "Reversed dates rejected");
@@ -83,7 +95,21 @@ internal static class ReportingChecks
         database.Logout();
         await Denied(async () => { await database.TrialBalance(a, 2026, 1); }, "Logged-out report rejected");
         var document = ReportFormatter.TrialBalance(trial);
-        Check(document.Headers.Count == 8 && document.Rows.Last().Summary, "Trial export has headers and general totals");
+        Check(document.Headers.Count == 6 && document.Rows.Last().Summary, "Trial export has GL columns and general totals");
+        Check(document.Rows.Single(r => r.Cells[0].Value == "1").Heading && !document.Rows.Single(r => r.Cells[0].Value == "1.01").Heading,
+            "Parent accounts print as headings, detail accounts with amounts");
+        Check(document.Rows.Single(r => r.Cells[0].Value == "1.01").Indent == 1, "Detail account indented by level");
+        var print = ReportFormatter.Html(document, false, false, false, new DateTime(2026, 10, 6));
+        Check(print.Contains("Fecha&nbsp; OCT 6,2026") && print.Contains("Enero / 2026") && print.Contains("counter(page)"), "Print header shows period, GL date and page numbers");
+        Check(ReportFormatter.Html(document, false, false, true).Contains("window.print()"), "Printer output opens the print dialog");
+        var range = ReportFormatter.AccountBalances(trial, "1", "1.99");
+        var rangeCodes = range.Rows.Where(r => !r.Summary).Select(r => r.Cells[0].Value).ToList();
+        Check(rangeCodes.SequenceEqual(new[] { "1", "1.01", "1.02" }), "Saldos report keeps only the selected account range");
+        Check(range.Rows.All(r => !r.Heading), "Saldos report prints parent totals");
+        var rangeTotal = range.Rows.Last();
+        Check(range.Headers.Count == 3 && rangeTotal.Summary && rangeTotal.Cells[2].Value == ((trial.Rows.Single(r => r.Code == "1.01").Closing + trial.Rows.Single(r => r.Code == "1.02").Closing) / 100m).ToString("F2", CultureInfo.InvariantCulture),
+            "Saldos report prints only balances; total adds detail accounts in range once");
+        Check(ReportFormatter.AccountBalances(trial, "", "").Rows.Count == trial.Rows.Count + 1, "Empty range selects all accounts");
         var csv = ReportFormatter.Csv(document);
         Check(csv.Contains("100.01") && csv.Contains("Empresa Á <prueba>"), "CSV keeps precise decimals and Unicode");
         var html = ReportFormatter.Html(document, true);

@@ -80,5 +80,9 @@ var unchanged = (await db.Journals(a, 2026, 9)).Single();
 await Denied(() => db.SaveJournal(a, unchanged, crossCompany), "Invalid edit rejected before replacing lines");
 Check((await db.Lines(a, unchanged.Id)).Single(l => l.DebitCents > 0).DebitCents == 200, "Invalid edit preserves saved movements");
 Console.WriteLine("All 37 checks passed.");
+await ImportChecks.Run(db, a, "1.1");
+AmountChecks.Run();
+await SessionChecks.Run(path, a, b);
 
+await FeatureChecks.Run();
 await ReportingChecks.Run();

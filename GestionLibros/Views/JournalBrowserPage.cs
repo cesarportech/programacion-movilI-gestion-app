@@ -39,19 +39,20 @@ public class JournalsPage : AccountingPage
         monthPicker.ItemsSource = Enumerable.Range(1, 12).Select(m => m.ToString("00")).ToArray();
         monthPicker.SelectedIndex = month - 1;
         ClassicWorkspaceChrome.CompactPeriod(monthPicker, reference);
-        monthPicker.SelectedIndexChanged += async (_, _) =>
+        monthPicker.SelectedIndexChanged += (_, _) =>
         {
             var value = monthPicker.SelectedIndex + 1;
             if (value == this.month || value < 1) return;
             this.month = value; activeTab = value + 1;
-            await Guard(Load);
+            Render(selected?.Journal.Id);
         };
         var toolbar = new HorizontalStackLayout { Spacing = 1, Padding = new Thickness(3, 2, 0, 0) };
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
             ("Asientos", "gl_journals.png", "journals"), ("Acumular", "gl_accumulate.png", "accumulate"),
             ("Consulta", "gl_query.png", "balances"), ("Balanza", "gl_trial.png", "trial"),
-            ("Saldos", "gl_balances.png", "balances"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
+            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
             toolbar.Children.Add(ClassicWorkspaceChrome.Tool(caption, image, () => Open(key)));
+        toolbar.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => Open("logout")));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
         period.Children.Add(ClassicWorkspaceChrome.Text("Mes", true)); period.Children.Add(monthPicker);
         period.Children.Add(ClassicWorkspaceChrome.Text("Año", true)); period.Children.Add(ClassicWorkspaceChrome.Text(year.ToString(), true));
@@ -62,12 +63,13 @@ public class JournalsPage : AccountingPage
         for (var i = 0; i < names.Length; i++)
         {
             var index = i;
-            var button = FlatButton(names[i], () => Guard(async () =>
+            var button = FlatButton(names[i], () =>
             {
                 activeTab = index;
                 if (index >= 2) { this.month = index - 1; monthPicker.SelectedIndex = this.month - 1; }
-                await Load();
-            }));
+                Render(selected?.Journal.Id);
+                return Task.CompletedTask;
+            });
             button.HorizontalOptions = LayoutOptions.Fill;
             button.HeightRequest = 22;
             button.Padding = new Thickness(3, 0);
@@ -159,7 +161,7 @@ public class JournalsPage : AccountingPage
         policy.Children.Add(ActionButton("Póliza", "gl_policy.png", () => Guard(FindReference), 94));
         lower.Add(policy, 0, 0);
         var edits = new HorizontalStackLayout { Spacing = 4 };
-        edits.Children.Add(ActionButton("Búsqueda", "gl_search.png", Search));
+        edits.Children.Add(ActionButton("Búsqueda", "gl_search.png", Search, 100));
         edits.Children.Add(ActionButton("Agregar", "gl_add.png", () => Guard(() => Navigation.PushAsync(new JournalEditor(db, company, new Journal { Date = new DateTime(year, this.month, 1) })))));
         edits.Children.Add(ActionButton("Cambiar", "gl_change.png", () => Guard(Edit)));
         edits.Children.Add(ActionButton("Borrar", "gl_delete.png", () => Guard(Delete)));
@@ -173,7 +175,7 @@ public class JournalsPage : AccountingPage
         var footer = new Grid { Padding = new Thickness(16, 1, 8, 1), ColumnDefinitions = { new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Auto) } };
         var left = new HorizontalStackLayout { Spacing = 5 };
         left.Children.Add(ActionButton("Filtro", "gl_filter.png", Search, 82));
-        var duplicate = ActionButton("Duplicar", "gl_add.png", () => DisplayAlertAsync("Duplicar", "La duplicación de pólizas todavía no está implementada.", "Cerrar"), 82);
+        var duplicate = ActionButton("Duplicar", "gl_add.png", () => Guard(Duplicate), 82);
         left.Children.Add(duplicate); footer.Add(left, 0, 0);
         var right = new HorizontalStackLayout { Spacing = 5 };
         right.Children.Add(ActionButton("Salir", "gl_close.png", async () => await Navigation.PopAsync(), 82));
@@ -197,7 +199,7 @@ public class JournalsPage : AccountingPage
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); return grid;
     }
 
-    private static Button FlatButton(string text, Func<Task> action, double width = -1)
+    internal static Button FlatButton(string text, Func<Task> action, double width = -1)
     {
         var button = new Button { Text = text, FontFamily = "Arial", FontSize = 11, FontAutoScalingEnabled = false,
             TextColor = Colors.Black, CornerRadius = 0, BorderWidth = 1, BorderColor = Colors.White,
@@ -214,7 +216,7 @@ public class JournalsPage : AccountingPage
         var label = ClassicWorkspaceChrome.Text(text, true); label.TextDecorations = TextDecorations.Underline;
         content.Add(label, 1, 0);
         var button = FlatButton("", action); button.HeightRequest = 25; button.BackgroundColor = Colors.Transparent;
-        AutomationProperties.SetName(button, text);
+        SemanticProperties.SetDescription(button, text);
         var layout = new Grid { WidthRequest = width, HeightRequest = 25, Background = ClassicWorkspaceChrome.ToolbarBrush() };
         content.InputTransparent = true; layout.Add(content); layout.Add(button);
         button.Pressed += (_, _) => { content.TranslationY = 1; content.TranslationX = 1; };
@@ -231,17 +233,15 @@ public class JournalsPage : AccountingPage
 
     private async Task Load()
     {
+        // The whole year is read once; changing tab or month only filters it in memory.
         var keep = selected?.Journal.Id;
-        journals = [];
-        if (activeTab < 2)
-            for (var m = 1; m <= 12; m++) journals.AddRange(await db.Journals(company.Id, year, m));
-        else journals = await db.Journals(company.Id, year, month);
+        journals = await db.JournalsOfYear(company.Id, year);
         Render(keep);
     }
 
     private void Render(int? keep = null)
     {
-        IEnumerable<Journal> result = journals;
+        IEnumerable<Journal> result = activeTab < 2 ? journals : journals.Where(j => j.Month == month);
         if (!string.IsNullOrWhiteSpace(filter)) result = result.Where(j => $"{j.Type} {j.Reference} {j.Concept} {j.ChangedBy}".Contains(filter, StringComparison.CurrentCultureIgnoreCase));
         result = activeTab == 0 ? result.OrderBy(j => j.Type).ThenBy(j => j.Reference, StringComparer.OrdinalIgnoreCase) : result.OrderBy(j => j.Date).ThenBy(j => j.Reference);
         visibleRows = result.Select(j => new JournalDisplayRow(j)).ToList();
@@ -282,12 +282,26 @@ public class JournalsPage : AccountingPage
         if (await DisplayAlertAsync("Borrar póliza", $"¿Borrar {journal.Type}-{journal.Reference} y sus movimientos?", "Borrar", "Cancelar"))
         { await db.DeleteJournal(company.Id, journal.Id); await Load(); }
     }
-    private Task Help() => DisplayAlertAsync("Tabla de Asientos", "Numero muestra las pólizas del año por tipo y referencia; Mes las ordena por fecha. Las pestañas de Enero a Diciembre filtran el mes. Búsqueda y Filtro buscan en la vista actual. Beneficiario, Banco y Status están pendientes en el modelo local; no se asignan valores ficticios. Duplicar todavía no está implementado.", "Cerrar");
+    // Copies the selected póliza and its movements with a new reference (suggests the next number).
+    private async Task Duplicate()
+    {
+        if (selected == null) throw new InvalidOperationException("Seleccione una póliza.");
+        var journal = selected.Journal;
+        var suggested = long.TryParse(journal.Reference, out var number) ? (number + 1).ToString() : journal.Reference + "-1";
+        var reference = await DisplayPromptAsync("Duplicar póliza", $"Nueva referencia para la copia de {journal.Type}-{journal.Reference} (misma fecha, concepto y movimientos):",
+            "Duplicar", "Cancelar", initialValue: suggested, maxLength: 60);
+        if (string.IsNullOrWhiteSpace(reference)) return;
+        await db.DuplicateJournal(company.Id, journal.Id, reference, journal.Date);
+        await Load();
+        Notice.Text = $"Póliza duplicada como {journal.Type}-{reference.Trim()}.";
+    }
+
+    private Task Help() => DisplayAlertAsync("Tabla de Asientos", "Numero muestra las pólizas del año por tipo y referencia; Mes las ordena por fecha. Las pestañas de Enero a Diciembre filtran el mes. Búsqueda y Filtro buscan en la vista actual. Beneficiario, Banco y Status están pendientes en el modelo local; no se asignan valores ficticios. Duplicar copia la póliza seleccionada con sus movimientos bajo una nueva referencia.", "Cerrar");
     private Task Open(string key) => Guard(async () =>
     {
         if (key == "exit") { await Navigation.PopAsync(); return; }
         if (key == "journals") { await Load(); return; }
-        if (key == "accumulate") { await DisplayAlertAsync("Aviso", "Acumular Saldos no está disponible en esta versión de prueba.", "Cerrar"); return; }
+        if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
         await Gl2000Chrome.Navigate(this, db, company, year, month, key);
     });
 

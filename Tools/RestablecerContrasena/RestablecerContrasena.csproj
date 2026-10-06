@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Local password recovery for FREDI. Uses the same data code as the app (no MAUI). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="sqlite-net-pcl" Version="1.9.172" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
+    <Compile Include="../../GestionLibros/Models/*.cs" LinkBase="Models" />
+    <Compile Include="../../GestionLibros/Data/AppDatabase.cs;../../GestionLibros/Data/AccountingOperations.cs;../../GestionLibros/Data/ReportingOperations.cs;../../GestionLibros/Data/ImportOperations.cs;../../GestionLibros/Data/SessionOperations.cs;../../GestionLibros/Data/AdministrationOperations.cs" LinkBase="Data" />
+    <Compile Include="../../GestionLibros/Data/Import/*.cs" LinkBase="Data/Import" />
+    <Compile Include="../../GestionLibros/Reporting/ReportFormatter.cs" LinkBase="Reporting" />
+  </ItemGroup>
+</Project>

@@ -21,8 +21,21 @@ internal static class Gl2000Chrome
     // same way estilo.ini used them (WallPaperType=2 = tile). card.png = Process/Report windows,
     // wood.png = data-entry Form windows, gl_fusion5.png = the main Frame watermark, gl_graymarb.png = Splash,
     // gl_bgmarble.png = About.
+    // Each wallpaper is also bundled pre-repeated into a larger block (Resources/Images/*_block.png, pixel
+    // identical). A 1920×1000 window then needs about 20 Image controls instead of ~460 (wood) or ~1,950 (card),
+    // which made every page slow to open and to enable/disable.
+    private static readonly Dictionary<string, (string File, int Width, int Height)> Blocks = new()
+    {
+        ["gl_card.png"] = ("gl_card_block.png", 330, 310),
+        ["gl_wood.png"] = ("gl_wood_block.png", 354, 375),
+        ["gl_fusion5.png"] = ("gl_fusion5_block.png", 468, 381),
+        ["gl_graymarb.png"] = ("gl_graymarb_block.png", 450, 510),
+        ["gl_bgmarble.png"] = ("gl_bgmarble_block.png", 440, 520),
+    };
+
     internal static View Tiled(string file, int tileWidth, int tileHeight, int columns = 16, int rows = 14)
     {
+        if (Blocks.TryGetValue(file, out var block)) (file, tileWidth, tileHeight) = block;
         // Fixed coordinates avoid FlexLayout shrinking tiles or leaving partially empty rows.
         var tiles = new AbsoluteLayout { IsClippedToBounds = true, InputTransparent = true };
         var lastColumns = 0;
@@ -66,16 +79,24 @@ internal static class Gl2000Chrome
         _ => ("gl_card.png", 33, 31),
     };
 
-    internal static Task Navigate(Page from, AppDatabase db, Company company, int year, int month, string key) =>
-        from.Navigation.PushAsync(key switch
+    internal static async Task Navigate(Page from, AppDatabase db, Company company, int year, int month, string key)
+    {
+        // Report windows, utilities and notices run on top of the current screen instead of navigating.
+        if (await MenuActions.TryRun(from, db, company, year, month, key)) return;
+        Page next = key switch
         {
-            "catalog" => new CatalogPage(db, company),
+            "catalog" => new CatalogPage(db, company, year, month),
             "journals" => new JournalsPage(db, company, year, month),
-            "trial" => new TrialBalancePage(db, company, year, month),
-            "ledger" => new LedgerPage(db, company, year, month),
             "admin" => new AdminPage(db),
             _ => new BalancesPage(db, company, year, month),
-        });
+        };
+        await from.Navigation.PushAsync(next, false);
+        // Switching module from the toolbar replaces the current one instead of piling pages up,
+        // so the app does not get heavier the longer it is used. The journal editor stays (unsaved draft).
+        if (from is CatalogPage or BalancesPage or JournalsPage or LedgerPage or AdminPage
+            && from.Navigation.NavigationStack.Contains(from))
+            from.Navigation.RemovePage(from);
+    }
 
     internal static View IconButton(string label, string glyph, Func<Task> action)
     {
@@ -94,12 +115,13 @@ internal static class Gl2000Chrome
     {
         IconButton("Catálogo", "📘", () => open("catalog")),
         IconButton("Asientos", "🗒️", () => open("journals")),
-        IconButton("Acumular", "🚦", () => page.DisplayAlertAsync("Aviso", "\"Acumular Saldos\" no está disponible en esta versión de prueba.", "Entendido")),
+        IconButton("Acumular", "🚦", () => MenuActions.Accumulate(page)),
         IconButton("Consulta", "🔎", () => open("balances")),
         IconButton("Balanza", "⚖️", () => open("trial")),
-        IconButton("Saldos", "🧮", () => open("balances")),
+        IconButton("Saldos", "🧮", () => open("saldos")),
         IconButton("Mayor", "📒", () => open("ledger")),
         IconButton("Salir", "✖", exit),
+        IconButton("Cerrar Sesión", "🔒", () => open("logout")),
     };
 
     private static View PeriodBadge(string label, string value)
@@ -153,12 +175,15 @@ internal static class Gl2000Chrome
     internal static void ApplyMenus(ContentPage page, Func<string, Task>? open)
     {
         page.MenuBarItems.Clear();
-        Task Stub(string name) => page.DisplayAlertAsync("Aviso", $"\"{name}\" no está disponible en esta versión de prueba.", "Entendido");
+        // Options without an equivalent yet say so; GL options that make no sense in FREDI explain why.
+        Task Stub(string name) => MenuActions.NotApplicableReason(name) is { } reason
+            ? page.DisplayAlertAsync(name, reason, "Entendido")
+            : page.DisplayAlertAsync("Aviso", $"\"{name}\" todavía no está implementado en FREDI.", "Entendido");
         Task Go(string key, string name) => open != null ? open(key) : Stub(name);
 
         var archivos = new MenuBarItem { Text = "Archivos" };
         void A(string text, Func<Task>? action = null) => archivos.Add(new MenuFlyoutItem { Text = text, Command = new Command(async () => await (action ?? (() => Stub(text)))()) });
-        A("Tipos de Pólizas");
+        A("Tipos de Pólizas", () => Go("policy-types", "Tipos de Pólizas"));
         A("Centros de Costo");
         A("Catálogo de Cuentas", () => Go("catalog", "Catálogo de Cuentas"));
         A("Asientos Contables", () => Go("journals", "Asientos Contables"));
@@ -173,7 +198,7 @@ internal static class Gl2000Chrome
         archivos.Add(conciliacion);
         var seguridad = new MenuFlyoutSubItem { Text = "Seguridad" };
         seguridad.Add(new MenuFlyoutItem { Text = "Usuarios", Command = new Command(async () => await Go("admin", "Empresas y usuarios")) });
-        seguridad.Add(new MenuFlyoutItem { Text = "Usuarios Conectados", Command = new Command(async () => await Stub("Usuarios Conectados")) });
+        seguridad.Add(new MenuFlyoutItem { Text = "Usuarios Conectados", Command = new Command(async () => await Go("sessions", "Usuarios Conectados")) });
         archivos.Add(seguridad);
         var estilos = new MenuFlyoutSubItem { Text = "Estilos" };
         estilos.Add(new MenuFlyoutItem { Text = "Configurar Estilos", Command = new Command(async () => await Stub("Estilos")) });
@@ -182,7 +207,8 @@ internal static class Gl2000Chrome
         A("Empresas", () => Go("admin", "Empresas"));
         A("Parámetros ...");
         A("Configurar Impresora ...");
-        A("Salir", () => Stub("Salir"));
+        A("Cerrar Sesión", () => Go("logout", "Cerrar Sesión"));
+        A("Salir", async () => { if (page.Navigation.NavigationStack.Count > 1) await page.Navigation.PopAsync(); });
         page.MenuBarItems.Add(archivos);
 
         var editar = new MenuBarItem { Text = "Editar" };
@@ -196,10 +222,10 @@ internal static class Gl2000Chrome
         O("Captura de Cheques");
         O("Consulta del Catálogo", () => Go("catalog", "Consulta del Catálogo"));
         O("Consulta de Bancos");
-        O("Acumular Saldos");
+        O("Acumular Saldos", () => MenuActions.Accumulate(page));
         O("Cierre Anual");
         O("Impresión de Cheques");
-        O("Impresión de Pólizas");
+        O("Impresión de Pólizas", () => Go("policy-print", "Impresión de Pólizas"));
         O("Cancelación de Cheques");
         O("Desgloce de Movimientos");
         O("Conciliar Proveedores / Clientes");
@@ -207,14 +233,16 @@ internal static class Gl2000Chrome
 
         var reportes = new MenuBarItem { Text = "Reportes" };
         reportes.Add(new MenuFlyoutItem { Text = "Balanza de comprobación", Command = new Command(async () => await Go("trial", "Balanza de comprobación")) });
+        reportes.Add(new MenuFlyoutItem { Text = "Saldos de Cuentas", Command = new Command(async () => await Go("saldos", "Saldos de Cuentas")) });
         reportes.Add(new MenuFlyoutItem { Text = "Mayor de cuenta", Command = new Command(async () => await Go("ledger", "Mayor de cuenta")) });
-        reportes.Add(new MenuFlyoutItem { Text = "Balance General", Command = new Command(async () => await Stub("Balance General")) });
-        reportes.Add(new MenuFlyoutItem { Text = "Estado de Resultados", Command = new Command(async () => await Stub("Estado de Resultados")) });
+        reportes.Add(new MenuFlyoutItem { Text = "Balance General", Command = new Command(async () => await Go("balance-sheet", "Balance General")) });
+        reportes.Add(new MenuFlyoutItem { Text = "Estado de Resultados", Command = new Command(async () => await Go("income-statement", "Estado de Resultados")) });
         reportes.Add(new MenuFlyoutItem { Text = "Comparativo Anual", Command = new Command(async () => await Stub("Comparativo Anual")) });
         page.MenuBarItems.Add(reportes);
 
         var utilerias = new MenuBarItem { Text = "Utilerías" };
-        void U(string text) => utilerias.Add(new MenuFlyoutItem { Text = text, Command = new Command(async () => await Stub(text)) });
+        void U(string text, Func<Task>? action = null) => utilerias.Add(new MenuFlyoutItem { Text = text, Command = new Command(async () => await (action ?? (() => Stub(text)))()) });
+        utilerias.Add(new MenuFlyoutItem { Text = "Importar Catálogo GL2000…", Command = new Command(async () => await Go("import-catalog", "Importar Catálogo GL2000")) });
         U("Pólizas sin Movimientos");
         U("Renumerar Pólizas de Egresos (GZZ)");
         U("Arreglar Fecha en Partidas");
@@ -225,13 +253,13 @@ internal static class Gl2000Chrome
         U("Exportar Saldos Iniciales");
         U("Importar Saldos Iniciales");
         var recuperacion = new MenuFlyoutSubItem { Text = "Recuperación de Datos" };
-        recuperacion.Add(new MenuFlyoutItem { Text = "Recuperar Todo", Command = new Command(async () => await Stub("Recuperación de Datos")) });
+        recuperacion.Add(new MenuFlyoutItem { Text = "Recuperar Todo", Command = new Command(async () => await page.DisplayAlertAsync("Recuperación de Datos", "Para recuperar un respaldo: cierre FREDI y reemplace el archivo fredi-pruebas-v1.db3 de la carpeta de datos por la copia de la carpeta Respaldos (Utilerías → Sistema de Respaldos).", "Entendido")) });
         utilerias.Add(recuperacion);
-        U("Importar / Exportar Catálogo CSV");
+        U("Importar / Exportar Catálogo CSV", () => Go("catalog-csv", "Importar / Exportar Catálogo CSV"));
         U("Editar Archivo INI");
         U("Generar Archivo INI");
         U("Bitácora de Mensajes");
-        U("Sistema de Respaldos");
+        U("Sistema de Respaldos", () => Go("backup", "Sistema de Respaldos"));
         page.MenuBarItems.Add(utilerias);
 
         var ventana = new MenuBarItem { Text = "Ventana" };

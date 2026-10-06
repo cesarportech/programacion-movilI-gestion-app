@@ -34,7 +34,7 @@ internal static class LoginWindowLayout
         }
         window.MinimumWidth = 0;
         window.MinimumHeight = 0;
-        window.Width = 218;
+        window.Width = 264;
         window.Height = height;
         Center(native);
 #endif

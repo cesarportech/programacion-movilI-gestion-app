@@ -12,7 +12,7 @@ public class LoginPage : ContentPage
     private readonly Label hint = Text("Ingrese su usuario y contraseña", 11);
     private readonly Label message = Text("", 11);
     private readonly AbsoluteLayout form = new() { BackgroundColor = DialogBlue };
-    private readonly VerticalStackLayout dialog = new() { Spacing = 0, WidthRequest = 216 };
+    private readonly VerticalStackLayout dialog = new() { Spacing = 0, WidthRequest = 262 };
     private readonly Button submit = Action("Ok", "login_accept.png");
     private readonly Button cancel = Action("Cancela", "login_cancel.png");
     private readonly Label confirmLabel = Text("Confirmar:", 11);
@@ -30,17 +30,17 @@ public class LoginPage : ContentPage
         caption.Children.Add(new Label { Text = "Iniciar Sesion:", FontFamily = "Arial", FontSize = 11,
             TextColor = Colors.Black, Margin = new Thickness(3, 0), VerticalTextAlignment = TextAlignment.Center });
         dialog.Children.Add(caption);
-        Put(Text("Sistema de Contabilidad", 16), 20, 3, 194, 24);
+        Put(Text("Sistema de Contabilidad", 16), 20, 3, 230, 24);
         Put(Text("Usuario:", 11), 33, 32, 76, 20);
-        Put(Box(username), 111, 31, 70, 20);
+        Put(Box(username), 111, 31, 130, 20);
         Put(Text("Contraseña:", 11), 33, 58, 76, 20);
-        Put(Box(password), 111, 57, 70, 20);
+        Put(Box(password), 111, 57, 130, 20);
         Put(confirmLabel, 33, 84, 76, 20);
         confirmBox = Box(confirm);
-        Put(confirmBox, 111, 83, 70, 20);
-        Put(hint, 16, 81, 190, 23);
-        Put(cancel, 22, 107, 82, 30);
-        Put(submit, 121, 107, 72, 30);
+        Put(confirmBox, 111, 83, 130, 20);
+        Put(hint, 16, 81, 230, 23);
+        Put(cancel, 36, 107, 82, 30);
+        Put(submit, 150, 107, 72, 30);
         dialog.Children.Add(form);
         message.BackgroundColor = Colors.White;
         message.TextColor = Color.FromArgb("#9D1010");
@@ -50,9 +50,9 @@ public class LoginPage : ContentPage
         var border = new Border { Content = dialog, Stroke = Color.FromArgb("#004A72"), StrokeThickness = 1,
             BackgroundColor = DialogBlue, Padding = 0, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
         Content = new Grid { Children = { border } };
-        AutomationProperties.SetName(username, "Usuario");
-        AutomationProperties.SetName(password, "Contraseña");
-        AutomationProperties.SetName(confirm, "Confirmar contraseña");
+        SemanticProperties.SetDescription(username, "Usuario");
+        SemanticProperties.SetDescription(password, "Contraseña");
+        SemanticProperties.SetDescription(confirm, "Confirmar contraseña");
         submit.IsEnabled = false;
         submit.Clicked += async (_, _) => await SignIn();
         cancel.Clicked += (_, _) => Cancel();
@@ -78,9 +78,9 @@ public class LoginPage : ContentPage
         confirmLabel.IsVisible = confirmBox.IsVisible = setup;
         hint.Text = setup ? "Cree el usuario maestro.\nContraseña: mínimo 10 caracteres." : "Ingrese su usuario y contraseña";
         form.HeightRequest = setup ? 190 : 142;
-        AbsoluteLayout.SetLayoutBounds(hint, new Rect(16, setup ? 108 : 81, 190, setup ? 40 : 23));
-        AbsoluteLayout.SetLayoutBounds(cancel, new Rect(22, setup ? 155 : 107, 82, 30));
-        AbsoluteLayout.SetLayoutBounds(submit, new Rect(121, setup ? 155 : 107, 72, 30));
+        AbsoluteLayout.SetLayoutBounds(hint, new Rect(16, setup ? 108 : 81, 230, setup ? 40 : 23));
+        AbsoluteLayout.SetLayoutBounds(cancel, new Rect(36, setup ? 155 : 107, 82, 30));
+        AbsoluteLayout.SetLayoutBounds(submit, new Rect(150, setup ? 155 : 107, 72, 30));
         if (Window != null) LoginWindowLayout.Compact(Window, DialogHeight);
     }
 
@@ -89,6 +89,13 @@ public class LoginPage : ContentPage
         base.OnAppearing();
         try
         {
+            // A remembered session skips the login until the user signs out.
+            var token = await SessionStore.Load();
+            if (token != null)
+            {
+                if (await database.Resume(token)) { EnterWorkspace(); return; }
+                SessionStore.Clear();
+            }
             setup = await database.NeedsSetup();
             ready = true;
             LayoutForm();
@@ -114,9 +121,8 @@ public class LoginPage : ContentPage
             }
             await database.Login(username.Text ?? "", password.Text ?? "");
             password.Text = confirm.Text = "";
-            var window = Window!;
-            window.Page = new NavigationPage(new WorkspacePage(database));
-            LoginWindowLayout.Restore(window);
+            await SessionStore.Save(await database.IssueToken());
+            EnterWorkspace();
         }
         catch (InvalidOperationException ex) { ShowError(ex.Message); }
         catch { ShowError("No se pudo completar el ingreso. Inténtelo nuevamente."); }
@@ -125,6 +131,13 @@ public class LoginPage : ContentPage
             busy = false;
             submit.IsEnabled = cancel.IsEnabled = username.IsEnabled = password.IsEnabled = confirm.IsEnabled = true;
         }
+    }
+
+    private void EnterWorkspace()
+    {
+        var window = Window!;
+        window.Page = new NavigationPage(new WorkspacePage(database));
+        LoginWindowLayout.Restore(window);
     }
 
     private void ShowError(string text)
@@ -157,7 +170,7 @@ public class LoginPage : ContentPage
     private static Border Box(Entry entry) => new()
     {
         Content = entry, BackgroundColor = Colors.White, Stroke = Colors.LightGray,
-        StrokeThickness = 1, Padding = new Thickness(2, 0)
+        StrokeThickness = 1, Padding = 0
     };
 
     private static Entry Field(string id, bool secret)
@@ -166,19 +179,7 @@ public class LoginPage : ContentPage
             FontAutoScalingEnabled = false, TextColor = Colors.Black, BackgroundColor = Colors.White,
             MinimumHeightRequest = 0, MinimumWidthRequest = 0, HeightRequest = 18,
             Margin = 0, IsTextPredictionEnabled = false, IsSpellCheckEnabled = false };
-#if WINDOWS
-        entry.HandlerChanged += (_, _) =>
-        {
-            if (entry.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.TextBox textBox)
-            {
-                textBox.MinHeight = textBox.MinWidth = 0;
-                textBox.Padding = new Microsoft.UI.Xaml.Thickness(0);
-                textBox.BorderThickness = new Microsoft.UI.Xaml.Thickness(0);
-                textBox.CornerRadius = new Microsoft.UI.Xaml.CornerRadius(0);
-                textBox.Resources["TextControlBorderThicknessFocused"] = new Microsoft.UI.Xaml.Thickness(0);
-            }
-        };
-#endif
+        ClassicWorkspaceChrome.CompactEntry(entry);
         return entry;
     }
 

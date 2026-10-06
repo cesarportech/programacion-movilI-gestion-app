@@ -20,6 +20,11 @@ public sealed partial class AppDatabase
    await db.CreateTableAsync<Account>();
    await db.CreateTableAsync<Journal>();
    await db.CreateTableAsync<JournalLine>();
+   await db.CreateTableAsync<ImportedBalance>();
+   await db.CreateTableAsync<SessionToken>();
+   await db.CreateTableAsync<PolicyType>();
+   await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PolicyType_Code ON PolicyType (CompanyId, Code)");
+   await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ImportedBalance_Period ON ImportedBalance (AccountId, Year, Month)");
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Journal_Reference ON Journal (CompanyId, Year, Type, Reference)");
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Account_Company_Code ON Account (CompanyId, Code)");
    ready = true;
@@ -45,7 +50,7 @@ public sealed partial class AppDatabase
  }
  public async Task Login(string username, string password)
  {
-  session = null;
+  session = null; tokenHash = null;
   await Initialize();
   username = username.Trim().ToLowerInvariant();
   var user = await db.Table<LocalUser>().Where(u => u.Username == username).FirstOrDefaultAsync();
@@ -54,7 +59,8 @@ public sealed partial class AppDatabase
   if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromBase64String(user.PasswordHash))) throw new InvalidOperationException("Usuario o contraseña incorrectos.");
   session = new(user.Id, user.Username, user.IsMaster, user.CompanyId);
  }
- public void Logout() => session = null;
+ // Clears the in-memory session only; SignOut also revokes the remembered token.
+ public void Logout() { session = null; tokenHash = null; }
  private UserSession RequireSession() => session ?? throw new InvalidOperationException("Debe iniciar sesión.");
  private void RequireMaster() { if (!RequireSession().IsMaster) throw new InvalidOperationException("Solo el usuario maestro puede administrar usuarios y contabilidades."); }
  private void RequireCompany(int companyId)
@@ -107,6 +113,6 @@ public sealed partial class AppDatabase
   if (parent != null && await db.Table<JournalLine>().Where(l => l.AccountId == parent.Id).CountAsync() > 0) throw new InvalidOperationException("No puede agregar subcuentas a una cuenta con movimientos.");
   var level = parent == null ? 1 : parent.Level + 1;
   if (level > 9) throw new InvalidOperationException("El catálogo admite hasta 9 niveles en esta versión de prueba.");
-  await db.InsertAsync(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level });
+  await db.InsertAsync(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now });
  }
 }
