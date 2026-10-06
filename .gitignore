@@ -436,3 +436,9 @@ FodyWeavers.xsd
 **/bin-next/
 
 **/bin-reports/
+
+**/bin-login*/
+**/bin-classic/
+**/bin-asientos/
+**/bin-partidas/
+**/bin-detalles/

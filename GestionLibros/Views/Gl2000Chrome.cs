@@ -23,10 +23,27 @@ internal static class Gl2000Chrome
     // gl_bgmarble.png = About.
     internal static View Tiled(string file, int tileWidth, int tileHeight, int columns = 16, int rows = 14)
     {
-        var flex = new FlexLayout { Wrap = Microsoft.Maui.Layouts.FlexWrap.Wrap, IsClippedToBounds = true };
-        for (var i = 0; i < columns * rows; i++)
-            flex.Children.Add(new Image { Source = file, WidthRequest = tileWidth, HeightRequest = tileHeight, Aspect = Aspect.Fill });
-        return flex;
+        // Fixed coordinates avoid FlexLayout shrinking tiles or leaving partially empty rows.
+        var tiles = new AbsoluteLayout { IsClippedToBounds = true, InputTransparent = true };
+        var lastColumns = 0;
+        var lastRows = 0;
+        tiles.SizeChanged += (_, _) =>
+        {
+            if (tiles.Width <= 0 || tiles.Height <= 0) return;
+            var across = (int)Math.Ceiling(tiles.Width / tileWidth);
+            var down = (int)Math.Ceiling(tiles.Height / tileHeight);
+            if (across == lastColumns && down == lastRows) return;
+            lastColumns = across; lastRows = down;
+            tiles.Children.Clear();
+            for (var row = 0; row < down; row++)
+                for (var column = 0; column < across; column++)
+                {
+                    var image = new Image { Source = file, Aspect = Aspect.Fill };
+                    AbsoluteLayout.SetLayoutBounds(image, new Rect(column * tileWidth, row * tileHeight, tileWidth, tileHeight));
+                    tiles.Children.Add(image);
+                }
+        };
+        return tiles;
     }
 
     // Layers a tiled texture behind page content, like the wallpaper the original templates painted
@@ -135,6 +152,7 @@ internal static class Gl2000Chrome
     // original screens. Items without an equivalent yet show a notice instead of silently doing nothing.
     internal static void ApplyMenus(ContentPage page, Func<string, Task>? open)
     {
+        page.MenuBarItems.Clear();
         Task Stub(string name) => page.DisplayAlertAsync("Aviso", $"\"{name}\" no está disponible en esta versión de prueba.", "Entendido");
         Task Go(string key, string name) => open != null ? open(key) : Stub(name);
 
