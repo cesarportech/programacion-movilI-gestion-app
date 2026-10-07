@@ -63,10 +63,13 @@ public sealed partial class AppDatabase
  public void Logout() { session = null; tokenHash = null; }
  private UserSession RequireSession() => session ?? throw new InvalidOperationException("Debe iniciar sesión.");
  private void RequireMaster() { if (!RequireSession().IsMaster) throw new InvalidOperationException("Solo el usuario maestro puede administrar usuarios y contabilidades."); }
+ // Each accounting is only reachable by the user assigned to it. The master administers companies
+ // and users but never opens an accounting: to see one, sign in with that company's user.
  private void RequireCompany(int companyId)
  {
   var user = RequireSession();
-  if (companyId <= 0 || (!user.IsMaster && user.CompanyId != companyId)) throw new InvalidOperationException("No tiene acceso a esta contabilidad.");
+  if (user.IsMaster) throw new InvalidOperationException("El usuario maestro solo administra empresas y usuarios. Para ver una contabilidad, entre con el usuario asignado a ella.");
+  if (companyId <= 0 || user.CompanyId != companyId) throw new InvalidOperationException("No tiene acceso a esta contabilidad.");
  }
  public async Task<List<Company>> Companies()
  {

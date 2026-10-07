@@ -29,8 +29,6 @@ public class WorkspacePage : AccountingPage
 
         Gl2000Chrome.ApplyMenus(this, Open);
         var archivos = MenuBarItems[0];
-        archivos.Insert(0, new MenuFlyoutItem { Text = "Seleccionar contabilidad…",
-            Command = new Command(async () => await Guard(SelectCompany)) });
         var exit = archivos.OfType<MenuFlyoutItem>().First(x => x.Text == "Salir");
         exit.Command = new Command(CloseApp);
         var menu = ClassicWorkspaceChrome.Menu(this, MenuBarItems.ToArray());
@@ -94,17 +92,6 @@ public class WorkspacePage : AccountingPage
         if (Window != null) ClassicWorkspaceChrome.WindowTitle(Window, Title);
     }
 
-    private async Task SelectCompany()
-    {
-        if (availableCompanies.Count == 0) throw new InvalidOperationException("No tiene contabilidades disponibles. El usuario maestro puede crearlas en Archivos → Empresas.");
-        var options = availableCompanies.Select(c => $"{c.Name} [{c.Id}]").ToArray();
-        var selected = await DisplayActionSheetAsync("Seleccionar contabilidad", "Cancelar", null, options);
-        var index = Array.IndexOf(options, selected);
-        if (index < 0) return;
-        company = availableCompanies[index];
-        UpdateTitle();
-    }
-
     // Salir: closes the program like the GL2000, keeping the session for the next start.
     private void CloseApp()
     {
@@ -118,7 +105,7 @@ public class WorkspacePage : AccountingPage
     private Task Open(string page) => Guard(async () =>
     {
         if (page == "logout") { await SessionActions.SignOut(this, db); return; }
-        if (page == "admin") { await Navigation.PushAsync(new AdminPage(db)); return; }
+        if (page == "admin") { await MenuActions.AdminOnly(this); return; }
         if (company == null) throw new InvalidOperationException("Seleccione o cree una contabilidad.");
         if (!int.TryParse(year.Text, out var y) || y < 1900 || y > 2100)
             throw new InvalidOperationException("Indique un año entre 1900 y 2100.");

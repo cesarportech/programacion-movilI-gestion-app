@@ -73,6 +73,37 @@ public sealed partial class AppDatabase
         return result;
     }
 
+    // Empresas y Usuarios (master only): every user with the company it belongs to.
+    public async Task<List<UserInfo>> UserList()
+    {
+        RequireMaster();
+        var companies = (await db.Table<Company>().ToListAsync()).ToDictionary(c => c.Id, c => c.Name);
+        return (await db.Table<LocalUser>().ToListAsync())
+            .Select(u => new UserInfo(u.Id, u.Username, u.IsMaster, u.CompanyId, u.IsMaster ? "Maestro" : companies.GetValueOrDefault(u.CompanyId, "?")))
+            .OrderByDescending(u => u.IsMaster).ThenBy(u => u.CompanyName).ThenBy(u => u.Username).ToList();
+    }
+
+    // The master sets a new password for a user (e.g. a forgotten one); the user's remembered sessions end.
+    public async Task SetUserPassword(int userId, string newPassword)
+    {
+        RequireMaster();
+        var user = await db.FindAsync<LocalUser>(userId) ?? throw new InvalidOperationException("Usuario no disponible.");
+        await ResetPassword(user.Username, newPassword);
+    }
+
+    // Removes an operator. The master cannot be removed; the company and its accounting stay.
+    public async Task DeleteUser(int userId)
+    {
+        RequireMaster();
+        await db.RunInTransactionAsync(c =>
+        {
+            var user = c.Find<LocalUser>(userId) ?? throw new InvalidOperationException("Usuario no disponible.");
+            if (user.IsMaster) throw new InvalidOperationException("El usuario maestro no se puede borrar.");
+            c.Execute("DELETE FROM SessionToken WHERE UserId = ?", userId);
+            c.Delete(user);
+        });
+    }
+
     // Usuarios Conectados: users with a remembered session (signed in and not signed out).
     public async Task<List<SessionInfo>> ActiveSessions()
     {

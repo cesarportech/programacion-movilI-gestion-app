@@ -15,9 +15,7 @@ static class ImportChecks
 
     public static async Task Run(AppDatabase db, int postedCompany, string postedParent)
     {
-        await db.Login("master", "Test-only-secret-123");
-        await db.AddCompany("Empresa Importada");
-        var target = (await db.Companies()).Single(c => c.Name == "Empresa Importada").Id;
+        var target = await TestSupport.NewCompany(db, "Test-only-secret-123", "Empresa Importada");
         var changed = new DateTime(2026, 2, 26);
         // Children listed before parents, like an unordered TPS file.
         List<GlAccount> catalog =
@@ -42,11 +40,11 @@ static class ImportChecks
         await Denied(() => db.ImportAccounts(target, [new("8", "", 0, "Valida", null, "", ""), new("9.1", "9", 1, "Huérfana", null, "", "")]), "Missing parent rejected");
         Check((await db.Accounts(target)).All(a => a.Code != "8"), "Rejected import rolls back every account");
         await Denied(() => db.ImportAccounts(target, [new("7", "", 0, "Uno", null, "", ""), new("7", "", 0, "Dos", null, "", "")]), "Duplicate code in source rejected");
+        await db.Login("operador", "Operator-secret-123");
         await Denied(() => db.ImportAccounts(postedCompany, [new("9.9.9", postedParent, 2, "Hija", null, "", "")]), "Child under posted account rejected");
 
         // GL accumulated amounts: opening of the year plus monthly debits/credits on detail accounts.
-        await db.AddCompany("Empresa Saldos");
-        var sums = (await db.Companies()).Single(c => c.Name == "Empresa Saldos").Id;
+        var sums = await TestSupport.NewCompany(db, "Test-only-secret-123", "Empresa Saldos");
         GlBalances Gl(long opening, params (int Month, long Debit, long Credit)[] months)
         {
             var debits = new long[12]; var credits = new long[12];
@@ -91,9 +89,7 @@ static class ImportChecks
             Check(rows.Count > 0 && rows.Select(r => r.Code).Distinct().Count() == rows.Count, "Real GL2000 catalog read with unique codes");
             Check(rows.All(r => r.ParentCode.Length == 0 || rows.Any(p => p.Code == r.ParentCode)), "Real GL2000 catalog has every parent");
             // The Consulta for September must show exactly the GL's own totals for the root account.
-            await db.Login("master", "Test-only-secret-123");
-            await db.AddCompany("Copia GL 003");
-            var copy = (await db.Companies()).Single(c => c.Name == "Copia GL 003").Id;
+            var copy = await TestSupport.NewCompany(db, "Test-only-secret-123", "Copia GL 003");
             await db.ImportAccounts(copy, rows, GlCatalog.YearOf(real));
             var root = rows.First(r => r.ParentCode.Length == 0).Balances!;
             var glOpening = root.Opening + root.Debits.Take(8).Sum() - root.Credits.Take(8).Sum();

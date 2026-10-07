@@ -19,9 +19,7 @@ static class FeatureChecks
         var path = Path.Combine(Path.GetTempPath(), $"fredi-features-{Guid.NewGuid():N}.db3");
         var db = new AppDatabase(path);
         await db.Setup("master", "Feature-test-1234");
-        await db.Login("master", "Feature-test-1234");
-        await db.AddCompany("Empresa F");
-        var c = (await db.Companies()).Single().Id;
+        var c = await TestSupport.NewCompany(db, "Feature-test-1234", "Empresa F");
         foreach (var (code, parent, name) in new[] { ("1", "", "ACTIVO"), ("1.1", "1", "Caja"), ("2", "", "PASIVO"), ("2.1", "2", "Proveedores"),
             ("3", "", "CAPITAL"), ("3.1", "3", "Capital social"), ("4", "", "INGRESOS"), ("4.1", "4", "Ventas"), ("5", "", "GASTOS"), ("5.1", "5", "Sueldos") })
             await db.AddAccount(c, code, name, parent);
@@ -72,17 +70,30 @@ static class FeatureChecks
         var parsed = CatalogCsv.Parse(csv);
         Check(parsed.Count == 10 && parsed.Single(a => a.Code == "1.1").ParentCode == "1", "Catalog CSV round-trips codes and parents");
         Check(CatalogCsv.Parse("\"9\";\"\";\"Cuenta; con punto y coma\"").Single().Description == "Cuenta; con punto y coma", "Catalog CSV accepts quoted semicolon files");
-        await db.AddCompany("Empresa CSV");
-        var other = (await db.Companies()).Single(x => x.Name == "Empresa CSV").Id;
+        var other = await TestSupport.NewCompany(db, "Feature-test-1234", "Empresa CSV");
         Check((await db.ImportAccounts(other, parsed)).Added == 10, "Catalog CSV imports into another company");
 
+        await db.Login("master", "Feature-test-1234");
         var backup = await db.Backup(Path.Combine(Path.GetTempPath(), $"fredi-backup-{Guid.NewGuid():N}"));
         var restored = new AppDatabase(backup);
-        await restored.Login("master", "Feature-test-1234");
+        await TestSupport.LoginAs(restored, c);
         Check((await restored.Accounts(c)).Count == 10, "Backup copy opens with the same data");
         Check((await db.ActiveSessions()).Count == 0, "No remembered sessions before issuing a token");
         await db.IssueToken();
         Check((await db.ActiveSessions()).Single().Username == "master", "Usuarios Conectados lists remembered sessions");
+        // Empresas y Usuarios: what the master can do; operators cannot.
+        var users = await db.UserList();
+        Check(users[0].IsMaster && users.Any(u => u.Username == TestSupport.UserFor(c) && u.CompanyName == "Empresa F"), "Master lists users with their company");
+        var operatorF = users.Single(u => u.Username == TestSupport.UserFor(c));
+        await db.SetUserPassword(operatorF.Id, "Cambiada-por-maestro-1");
+        await Denied(() => db.SetUserPassword(operatorF.Id, "corta"), "Master password change keeps the 10-character minimum");
+        await Denied(() => db.DeleteUser(users.Single(u => u.IsMaster).Id), "Master user cannot be deleted");
+        await db.DeleteUser(users.Single(u => u.Username == TestSupport.UserFor(other)).Id);
+        await Denied(() => db.Login(TestSupport.UserFor(other), TestSupport.OperatorPassword), "Deleted user cannot sign in");
+        await db.Login(TestSupport.UserFor(c), "Cambiada-por-maestro-1");
+        Check(db.Session?.CompanyId == c, "Operator signs in with the password set by the master");
+        await Denied(async () => { await db.UserList(); }, "Operator cannot list users");
+        await Denied(async () => { await db.DeleteUser(operatorF.Id); }, "Operator cannot delete users");
         Console.WriteLine($"All {passed} feature checks passed.");
     }
 }

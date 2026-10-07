@@ -136,7 +136,8 @@ public class LoginPage : ContentPage
     private void EnterWorkspace()
     {
         var window = Window!;
-        window.Page = new NavigationPage(new WorkspacePage(database));
+        // The master administers companies and users; every other user goes straight to their accounting.
+        window.Page = new NavigationPage(database.Session?.IsMaster == true ? new AdminPage(database) : new WorkspacePage(database));
         LoginWindowLayout.Restore(window);
     }
 

@@ -87,13 +87,12 @@ internal static class Gl2000Chrome
         {
             "catalog" => new CatalogPage(db, company, year, month),
             "journals" => new JournalsPage(db, company, year, month),
-            "admin" => new AdminPage(db),
             _ => new BalancesPage(db, company, year, month),
         };
         await from.Navigation.PushAsync(next, false);
         // Switching module from the toolbar replaces the current one instead of piling pages up,
         // so the app does not get heavier the longer it is used. The journal editor stays (unsaved draft).
-        if (from is CatalogPage or BalancesPage or JournalsPage or LedgerPage or AdminPage
+        if (from is CatalogPage or BalancesPage or JournalsPage or LedgerPage
             && from.Navigation.NavigationStack.Contains(from))
             from.Navigation.RemovePage(from);
     }

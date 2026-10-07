@@ -36,6 +36,7 @@ public class PolicyType
  public string Code { get; set; } = "";
  public string Description { get; set; } = "";
 }
+public record UserInfo(int Id, string Username, bool IsMaster, int CompanyId, string CompanyName);
 public record SessionInfo(string Username, bool IsMaster, DateTime CreatedAt, DateTime LastUsedAt);
 // One movement of a printed póliza, with its account resolved.
 public record PolicyPrintLine(string AccountCode, string AccountName, string Concept, long Debits, long Credits);

@@ -22,11 +22,10 @@ internal static class ReportingChecks
         }
         var database = new AppDatabase(Path.Combine(Path.GetTempPath(), $"fredi-reports-{Guid.NewGuid():N}.db3"));
         await database.Setup("master", "Report-test-1234");
-        await database.Login("master", "Report-test-1234");
-        await database.AddCompany("Empresa Á <prueba>"); await database.AddCompany("Empresa B");
-        var companies = await database.Companies();
-        var a = companies.Single(c => c.Name.StartsWith("Empresa Á")).Id;
-        var b = companies.Single(c => c.Name == "Empresa B").Id;
+        var b = await TestSupport.NewCompany(database, "Report-test-1234", "Empresa B");
+        await database.AddAccount(b, "1", "Solo B", "");
+        var foreign = (await database.Accounts(b)).Single().Id;
+        var a = await TestSupport.NewCompany(database, "Report-test-1234", "Empresa Á <prueba>");
         await database.AddAccount(a, "1", "Activos", "");
         await database.AddAccount(a, "1.01", "Caja", "1");
         await database.AddAccount(a, "1.02", "Banco", "1");
@@ -34,7 +33,6 @@ internal static class ReportingChecks
         await database.AddAccount(a, "3", "Sin actividad", "");
         // Similar prefix must not make this account a child of 1.
         await database.AddAccount(a, "10", "Cuenta independiente", "");
-        await database.AddAccount(b, "1", "Solo B", "");
         var accounts = await database.Accounts(a);
         var root = accounts.Single(x => x.Code == "1").Id;
         var cash = accounts.Single(x => x.Code == "1.01").Id;
@@ -58,7 +56,9 @@ internal static class ReportingChecks
         Check(levelOne.Rows.All(r => r.Level <= 1) && levelOne.Totals == trial.Totals, "Level filter preserves general totals");
         var active = await database.TrialBalance(a, 2026, 1, 9, false);
         Check(active.Rows.All(r => r.Code != "3") && active.Totals == trial.Totals, "Zero filter excludes inactive accounts only");
+        await TestSupport.LoginAs(database, b);
         var empty = await database.TrialBalance(b, 2026, 1);
+        await TestSupport.LoginAs(database, a);
         Check(empty.Totals.Debits == 0 && empty.Rows.Count == 1, "Other company has no leaked movements");
         var ledger = await database.Ledger(a, cash, new DateTime(2026, 1, 1), new DateTime(2026, 1, 31));
         Check(ledger.Opening == 10001 && ledger.Rows.Count == 2, "Ledger opening and inclusive boundaries");
@@ -86,8 +86,8 @@ internal static class ReportingChecks
         await Denied(async () => { await database.TrialBalance(a, 2026, 1, 10); }, "Invalid level rejected");
         await Denied(async () => { await database.TrialBalance(a, 2026, 13); }, "Invalid month rejected");
         await Denied(async () => { await database.Ledger(a, cash, new DateTime(2026, 2, 1), new DateTime(2026, 1, 1)); }, "Reversed dates rejected");
-        var foreign = (await database.Accounts(b)).Single().Id;
         await Denied(async () => { await database.Ledger(a, foreign, new DateTime(2026, 1, 1), new DateTime(2026, 1, 31)); }, "Forged account ID rejected");
+        await database.Login("master", "Report-test-1234");
         await database.AddUser("operator", "Operator-test-1234", a);
         await database.Login("operator", "Operator-test-1234");
         await Denied(async () => { await database.TrialBalance(b, 2026, 1); }, "Operator cannot read foreign trial balance");
