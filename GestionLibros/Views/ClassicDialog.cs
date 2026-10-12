@@ -1,4 +1,4 @@
-namespace GestionLibros.Views;
+﻿namespace GestionLibros.Views;
 
 // Small floating child window in the GL2000 style (title bar with close button, "General" tab,
 // green form and Aceptar / Cancelar / Ayuda), drawn over its page. The full-size transparent layer
@@ -25,7 +25,7 @@ internal abstract class ClassicDialog : Grid
             BackgroundColor = PanelGreen, Stroke = Colors.Gray, StrokeThickness = 1, Content = ClassicWorkspaceChrome.Text("General", true) };
         var buttons = new HorizontalStackLayout { Spacing = 5, HorizontalOptions = LayoutOptions.End, Padding = new Thickness(0, 4, 2, 0) };
         buttons.Children.Add(JournalsPage.ActionButton("Aceptar", "login_accept.png", Accept, 84));
-        buttons.Children.Add(JournalsPage.ActionButton("Cancelar", "login_cancel.png", () => { Close(); return Task.CompletedTask; }, 88));
+        buttons.Children.Add(JournalsPage.ActionButton("Cancelar", "login_cancel.png", RequestClose, 88));
         buttons.Children.Add(JournalsPage.ActionButton("Ayuda", "gl_help.png", () => owner.DisplayAlertAsync(helpTitle, helpText, "Cerrar"), 82));
 
         var content = new Grid { Padding = new Thickness(6, 4, 6, 6), RowSpacing = 0,
@@ -33,7 +33,7 @@ internal abstract class ClassicDialog : Grid
         content.Add(tab, 0, 0);
         content.Add(new Border { Stroke = Colors.Gray, StrokeThickness = 1, Padding = 0, Content = Form }, 0, 1);
         content.Add(buttons, 0, 2);
-        Add(ChildWindow(caption, content, width, Close));
+        Add(ChildWindow(caption, content, width, async () => await RequestClose()));
     }
 
     // Child-window frame: gradient title bar with icon, caption and red close button, around any content.
@@ -112,6 +112,8 @@ internal abstract class ClassicDialog : Grid
         IsVisible = true;
         Dispatcher.Dispatch(() => focus.Focus());
     }
+
+    protected virtual Task RequestClose() { Close(); return Task.CompletedTask; }
 
     protected void Close() { if (!busy) IsVisible = false; }
 

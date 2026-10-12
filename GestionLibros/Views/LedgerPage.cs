@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 using GestionLibros.Reporting;
 
@@ -16,6 +16,7 @@ public class LedgerPage : AccountingPage
     private readonly CheckBox children = new() { IsChecked = true };
     private readonly VerticalStackLayout rows = new() { Spacing = 1, MinimumWidthRequest = 1200 };
     private readonly Label totals = AccountingUi.Label("Seleccione cuenta y fechas, luego pulse Consultar.", true);
+    private readonly Label historicalInfo = AccountingUi.Label("");
     private bool initialized;
     private string? lastExport;
     private readonly Button openExport;
@@ -52,7 +53,7 @@ public class LedgerPage : AccountingPage
         actions.Children.Add(AccountingUi.Button("Ayuda", () => DisplayAlertAsync("Ayuda", "Elija cuenta y fechas, luego use Consultar.", "Cerrar")));
         Body.Children.Add(actions); Body.Children.Add(AccountingUi.Table(rows)); Body.Children.Add(totals);
         Body.Children.Add(AccountingUi.Label("Saldo deudor positivo y acreedor negativo. Para cuentas superiores, Incluir subcuentas permite ver los movimientos de sus descendientes."));
-        Body.Children.Add(Notice);
+        Body.Children.Add(historicalInfo); Body.Children.Add(Notice);
         account.SelectedIndexChanged += (_, _) => Invalidate();
         from.DateSelected += (_, _) => Invalidate(); through.DateSelected += (_, _) => Invalidate();
         children.CheckedChanged += (_, _) => Invalidate();
@@ -78,15 +79,17 @@ public class LedgerPage : AccountingPage
     private void Invalidate()
     {
         rows.Children.Clear(); totals.Text = "Filtros modificados. Pulse Consultar para ver el mayor.";
-        lastExport = null; openExport.IsEnabled = false;
+        lastExport = null; openExport.IsEnabled = false; historicalInfo.Text = "";
     }
 
     private async Task<ReportDocument> Load()
     {
+        Invalidate();
         if (account.SelectedItem is not AccountOption selected) throw new InvalidOperationException("Seleccione una cuenta.");
         if (from.Date == null || through.Date == null) throw new InvalidOperationException("Seleccione las fechas inicial y final.");
         var report = await db.Ledger(company.Id, selected.Account.Id, from.Date.Value, through.Date.Value, children.IsChecked);
         var document = ReportFormatter.Ledger(report);
+        historicalInfo.Text = report.HasImportedBalances ? document.Note : "";
         rows.Children.Clear(); rows.Children.Add(AccountingUi.Row(document.Headers.ToArray(), true));
         foreach (var row in document.Rows) rows.Children.Add(AccountingUi.Row(row.Cells.Select(c => c.Display).ToArray(), row.Summary, linkColumns: row.Summary ? 0 : 3));
         totals.Text = $"Saldo inicial: {AccountingUi.Money(report.Opening)} · Cargos: {AccountingUi.Money(report.Debits)} · Créditos: {AccountingUi.Money(report.Credits)} · Saldo final: {AccountingUi.Money(report.Closing)}";

@@ -93,3 +93,6 @@ await SessionChecks.Run(path, a, b);
 
 await FeatureChecks.Run();
 await ReportingChecks.Run();
+await LedgerImportChecks.Run();
+await SessionRevocationChecks.Run();
+await DraftChecks.Run();

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using GestionLibros.Data;
 using GestionLibros.Models;
 namespace GestionLibros.Views;
@@ -76,5 +76,5 @@ public class AccountingPage : ContentPage
  // Runs one operation at a time. A flag instead of Content.IsEnabled: disabling the page cascaded
  // through every control on each query, which made pages slow to respond.
  private bool working;
- protected async Task Guard(Func<Task> work) { if (working) return; working = true; Notice.Text = ""; try { await work(); } catch (InvalidOperationException ex) { Notice.Text = ex.Message; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo completar la operación. Revise los datos e inténtelo nuevamente."; } finally { working = false; } }
+ protected async Task Guard(Func<Task> work) { if (working) return; working = true; Notice.Text = ""; try { (Application.Current as App)?.Database.ValidateSession(true); await work(); } catch (InvalidOperationException ex) { Notice.Text = ex.Message; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo completar la operación. Revise los datos e inténtelo nuevamente."; } finally { working = false; } }
 }

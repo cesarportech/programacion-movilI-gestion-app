@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 namespace GestionLibros.Views;
 public partial class JournalEditor : AccountingPage
@@ -12,15 +12,17 @@ public partial class JournalEditor : AccountingPage
  private List<Account> accounts = []; private readonly List<JournalLine> lines = []; private JournalLine? selected; private bool loaded;
  private readonly MovementDialog movementDialog;
  public JournalEditor(AppDatabase db, Company company, Journal journal) : base(journal.Id == 0 ? "Agregando un Asiento" : "Cambiando un Asiento") {
-  this.db = db; this.company = company; original = journal;
+  this.db = db; this.company = company; original = System.Text.Json.JsonSerializer.Deserialize<Journal>(System.Text.Json.JsonSerializer.Serialize(journal))!;
   movementDialog = new MovementDialog(this);
   type.Text = journal.Type; reference.Text = journal.Reference; date.Date = journal.Date; concept.Text = journal.Concept;
   BuildClassicEditor();
+  TrackChanges();
  }
- protected override async void OnAppearing() { base.OnAppearing(); if (Window != null) ClassicWorkspaceChrome.WindowTitle(Window, Title); await Guard(async () => { if (!loaded) { accounts = await db.Accounts(company.Id); policyTypes = await db.PolicyTypes(company.Id); ShowTypeName(); if (original.Id != 0) lines.AddRange(await db.Lines(company.Id, original.Id)); loaded = true; } Render(); }); }
+ protected override async void OnAppearing() { base.OnAppearing(); if (Window != null) ClassicWorkspaceChrome.WindowTitle(Window, Title); await Guard(async () => { if (!loaded) { accounts = await db.Accounts(company.Id); policyTypes = await db.PolicyTypes(company.Id); ShowTypeName(); if (original.Id != 0) lines.AddRange(await db.Lines(company.Id, original.Id)); loaded = true; baseline = Fingerprint(); await RecoverDraft(); } Render(); }); }
  private Task EditLine(JournalLine? line) => Guard(() => PushLine(line));
  private Task PushLine(JournalLine? line)
  {
+  editingIndex = line == null ? -1 : lines.IndexOf(line);
   var parents = accounts.Select(a => a.ParentCode).ToHashSet();
   var title = $"{(line == null ? "Agregando" : "Cambiando")} : {(type.Text ?? "").Trim()}-{(reference.Text ?? "").Trim()}";
   movementDialog.Show(title, accounts.Where(a => !parents.Contains(a.Code)).ToList(), line, concept.Text ?? "", result =>
@@ -42,5 +44,6 @@ public partial class JournalEditor : AccountingPage
   sums.Text = debit == credit ? "Sumas Iguales :" : "Diferencia: " + AccountingUi.Money(debit-credit);
   sums.TextColor = debit == credit ? Colors.Blue : Colors.DarkRed;
   debitTotal.Text = AccountingUi.Money(debit); creditTotal.Text = AccountingUi.Money(credit);
+  PersistDraft();
  }
 }

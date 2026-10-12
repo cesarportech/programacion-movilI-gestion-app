@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Text;
 using GestionLibros.Models;
@@ -57,7 +57,7 @@ public static class ReportFormatter
             rows.Add(new([T(""), T(title), T("")], Heading: true));
             rows.AddRange(accounts.Select(b => new ReportRow([T(b.Code), T(b.Description), M(sign * b.Closing)],
                 Indent: Math.Max(0, b.Level - 1))));
-            var total = accounts.Where(b => b.IsDetail).Sum(b => sign * b.Closing);
+            var total = report.DetailRows.Where(b => b.Code.StartsWith(digit)).Sum(b => checked(sign * b.Closing));
             rows.Add(new([T(""), T("Total " + title), M(total)], true));
             rows.Add(new([T(""), T(""), T("")]));
             return total;
@@ -65,7 +65,7 @@ public static class ReportFormatter
         var assets = Section('1', "ACTIVO", 1);
         var liabilities = Section('2', "PASIVO", -1);
         var capital = Section('3', "CAPITAL", -1);
-        var result = -report.Rows.Where(b => b.IsDetail && Data.AppDatabase.IsResultAccount(b.Code)).Sum(b => b.Closing);
+        var result = checked(-report.DetailRows.Where(b => Data.AppDatabase.IsResultAccount(b.Code)).Sum(b => b.Closing));
         rows.Add(new([T(""), T(result >= 0 ? "Utilidad del Ejercicio" : "Pérdida del Ejercicio"), M(result)]));
         rows.Add(new([T(""), T("Total Pasivo y Capital"), M(liabilities + capital + result)], true));
         var note = assets == liabilities + capital + result ? "Activo igual a Pasivo más Capital." : "Activo y Pasivo más Capital no coinciden: revise el catálogo y los movimientos.";
@@ -84,7 +84,7 @@ public static class ReportFormatter
             rows.Add(new([T(""), T(title), T(""), T("")], Heading: true));
             rows.AddRange(accounts.Select(r => new ReportRow([T(r.Code), T(r.Description), M(sign * r.Month), M(sign * r.YearToDate)],
                 Indent: Math.Max(0, r.Level - 1))));
-            var detail = accounts.Where(r => r.IsDetail).ToList();
+            var detail = report.DetailRows.Where(r => belongs(r.Code)).ToList();
             (long, long) total = (detail.Sum(r => sign * r.Month), detail.Sum(r => sign * r.YearToDate));
             rows.Add(new([T(""), T("Total " + title), M(total.Item1), M(total.Item2)], true));
             rows.Add(new([T(""), T(""), T(""), T("")]));
@@ -129,7 +129,7 @@ public static class ReportFormatter
         var selected = report.Rows.Where(b => InRange(b.Code)).ToList();
         var rows = selected.Select(b => new ReportRow(new[] { T(b.Code), T(b.Description), M(b.Closing) },
             Indent: Math.Max(0, b.Level - 1))).ToList();
-        rows.Add(new(new[] { T(""), T("Total"), M(selected.Where(b => b.IsDetail).Sum(b => b.Closing)) }, true));
+        rows.Add(new(new[] { T(""), T("Total"), M(report.DetailRows.Where(b => InRange(b.Code)).Sum(b => b.Closing)) }, true));
         var range = Range(from, through);
         return new("Reporte de Saldos de Cuentas", report.CompanyName, MonthPeriod(report.Year, report.Month),
             report.MaximumLevel < 9 ? $"{range}. Nivel máximo: {report.MaximumLevel}" : range,
@@ -154,7 +154,7 @@ public static class ReportFormatter
                 continue;
             }
             rows.Add(new([T(account.Code), T(account.Description), T(""), T(""), T("SALDO ANTERIOR:"), .. Side(account.Opening)]));
-            rows.AddRange(account.Movements.Select(m => new ReportRow([T(""), T(""), T(m.Date.ToString("d/M/yyyy")),
+            rows.AddRange(account.Movements.Select(m => new ReportRow([T(""), T(""), T(m.Date.ToString(m.IsImported ? "MM/yyyy" : "d/M/yyyy", CultureInfo.InvariantCulture)),
                 T($"{m.Type}  {m.Reference}".Trim()), T(m.Concept), M(m.Debits), M(m.Credits)])));
             rows.Add(new([T(""), T(""), T(""), T(""), T("Total Cargos / Créditos :"), M(account.Debits), M(account.Credits)], true));
             rows.Add(new([T(""), T(""), T(""), T(""), T("SALDO ACTUAL:"), .. Side(account.Closing)]));
@@ -164,20 +164,20 @@ public static class ReportFormatter
         return new("Reporte de Mayor", report.CompanyName, period, range,
             new[] { "Cuenta", "Descripción", "Fecha", "Referencia", "Concepto", "Cargos", "Créditos" }, rows,
             "Saldos: deudor en Cargos, acreedor en Créditos. Las partidas son las pólizas capturadas en FREDI; " +
-            "los importes importados del GL2000 aparecen como un acumulado por mes.");
+            "los importes importados del GL2000 aparecen como un acumulado por mes, sin detalle diario.");
     }
 
     public static ReportDocument Ledger(LedgerReport report)
     {
         var rows = new List<ReportRow> { new(new[] { T(""), T(""), T(report.AccountCode), T("Saldo inicial"), M(0), M(0), M(report.Opening) }, true) };
-        rows.AddRange(report.Rows.Select(r => new ReportRow(new[] { T(r.Date.ToString("dd/MM/yyyy")),
-            T($"{r.Type}-{r.Reference}"), T(r.AccountCode), T(r.Concept), M(r.Debits), M(r.Credits), M(r.Balance) })));
+        rows.AddRange(report.Rows.Select(r => new ReportRow(new[] { T(r.Date.ToString(r.IsImported ? "MM/yyyy" : "dd/MM/yyyy", CultureInfo.InvariantCulture)),
+            T(r.IsImported ? "GL2000" : $"{r.Type}-{r.Reference}"), T(r.AccountCode), T(r.Concept), M(r.Debits), M(r.Credits), M(r.Balance) })));
         rows.Add(new(new[] { T("TOTAL"), T(""), T(""), T("Movimientos del período / saldo final"), M(report.Debits), M(report.Credits), M(report.Closing) }, true));
         return new("Mayor de Cuenta", report.CompanyName, $"{report.From:dd/MM/yyyy} al {report.Through:dd/MM/yyyy}",
             $"Cuenta: {report.AccountCode} - {report.AccountName}. Subcuentas: {(report.IncludesChildren ? "incluidas" : "excluidas")}",
             new[] { "Fecha", "Póliza", "Cuenta", "Concepto", "Cargos", "Créditos", "Saldo" }, rows,
             "Saldo deudor positivo y acreedor negativo. El saldo inicial incluye movimientos anteriores al rango. " +
-            "Orden: fecha, tipo, referencia, identificador de póliza y movimiento. Solo incluye pólizas registradas en FREDI.");
+            (report.HasImportedBalances ? "Incluye saldos GL2000 y acumulados mensuales identificados, sin detalle diario. Los acumulados se muestran al cierre de cada mes; los saldos intermedios no representan saldos diarios completos. Consulte meses completos con actividad importada y un ejercicio a la vez. Las cuentas superiores conservan sus acumulados propios cuando existen." : "Incluye pólizas registradas en FREDI, ordenadas por fecha, tipo, referencia y claves de póliza/movimiento."));
     }
 
     public static ReportDocument Balances(string company, int year, int month, string filter, IReadOnlyList<BalanceRow> balances)

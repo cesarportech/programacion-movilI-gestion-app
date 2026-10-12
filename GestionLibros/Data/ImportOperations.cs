@@ -1,4 +1,4 @@
-using GestionLibros.Data.Import;
+﻿using GestionLibros.Data.Import;
 using GestionLibros.Models;
 
 namespace GestionLibros.Data;
@@ -25,6 +25,7 @@ public sealed partial class AppDatabase
         var added = 0; var skipped = 0; var balanceAccounts = 0;
         await db.RunInTransactionAsync(c =>
         {
+            RequireSession();
             if (c.Find<Company>(companyId) == null) throw new InvalidOperationException("Contabilidad no disponible.");
             var existing = c.Table<Account>().Where(a => a.CompanyId == companyId).ToList().ToDictionary(a => a.Code);
             var posted = c.Query<JournalLine>("SELECT l.* FROM JournalLine l INNER JOIN Account a ON a.Id = l.AccountId WHERE a.CompanyId = ?", companyId)

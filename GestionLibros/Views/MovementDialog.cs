@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using GestionLibros.Data;
 using GestionLibros.Models;
 
@@ -17,6 +17,29 @@ internal sealed class MovementDialog : ClassicDialog
     private readonly Label side = ClassicWorkspaceChrome.Text("", true);
     private List<Account> detail = [];
     private Action<JournalLine>? accept;
+    private string baseline = "";
+    public event Action? Changed;
+    private string Fingerprint => System.Text.Json.JsonSerializer.Serialize(new[] { account.Text, concept.Text, value.Text });
+    public bool HasChanges => IsVisible && Fingerprint != baseline;
+    internal void Abandon() => Close();
+    public MovementDraft Capture(int index) => new(account.Text ?? "", concept.Text ?? "", value.Text ?? "", index);
+    public void Restore(MovementDraft draft) { account.Text = draft.Account; concept.Text = draft.Concept; value.Text = draft.Value; baseline = ""; }
+    public async Task<bool> CommitPending()
+    {
+        if (!HasChanges) return true;
+        await Accept();
+        return !IsVisible;
+    }
+    protected override async Task RequestClose()
+    {
+        if (HasChanges)
+        {
+            var choice = await Owner.DisplayActionSheetAsync("Movimiento sin guardar", "Continuar editando", "Descartar", "Guardar");
+            if (choice == "Guardar") { await Accept(); return; }
+            if (choice != "Descartar") return;
+        }
+        Close();
+    }
 
     public MovementDialog(Page page) : base(page, 440, 124, "Movimiento",
         "Cuenta: cuenta de detalle (la lupa busca por número o nombre). Valor: positivo es cargo, negativo es crédito. " +
@@ -37,6 +60,8 @@ internal sealed class MovementDialog : ClassicDialog
         Put(side, 80, 86, 120, 16);
         Put(Error, 8, 104, 410, 16);
 
+        foreach (var field in new[] { account, concept, value }) field.TextChanged += (_, _) => { if (IsVisible) Changed?.Invoke(); };
+        PropertyChanged += (_, e) => { if (e.PropertyName == nameof(IsVisible)) Changed?.Invoke(); };
         account.TextChanged += (_, _) => ShowAccount();
         account.Completed += (_, _) => concept.Focus();
         concept.Completed += (_, _) => value.Focus();
@@ -51,6 +76,7 @@ internal sealed class MovementDialog : ClassicDialog
         concept.Text = line?.Concept ?? defaultConcept;
         value.Text = line == null ? "0.00" : Format((line.DebitCents - line.CreditCents) / 100m);
         ShowAccount(); ShowSide();
+        baseline = Fingerprint;
         Open(title, account);
     }
 

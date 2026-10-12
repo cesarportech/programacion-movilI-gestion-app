@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 
 namespace GestionLibros.Views;
 
@@ -9,8 +9,9 @@ internal static class SessionActions
     internal static async Task SignOut(Page page, AppDatabase db)
     {
         if (!await page.DisplayAlertAsync("Cerrar Sesión",
-            "¿Cerrar la sesión? La próxima vez se pedirá usuario y contraseña. Los cambios sin aceptar en pantallas abiertas se pierden.",
+            "¿Cerrar la sesión? La próxima vez se pedirá usuario y contraseña. Se revisarán los cambios pendientes antes de salir.",
             "Cerrar Sesión", "Cancelar")) return;
+        if (!await PendingEdits.Confirm(page.Window)) return;
         SessionStore.Clear();
         try { await db.SignOut(); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); db.Logout(); }

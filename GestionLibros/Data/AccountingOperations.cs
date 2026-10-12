@@ -1,4 +1,4 @@
-using GestionLibros.Models;
+﻿using GestionLibros.Models;
 namespace GestionLibros.Data;
 public sealed partial class AppDatabase
 {
@@ -9,6 +9,7 @@ public sealed partial class AppDatabase
   description = description.Trim();
   if (description.Length == 0 || description.Length > 200) throw new InvalidOperationException("Escriba una descripción de hasta 200 caracteres.");
   await db.RunInTransactionAsync(c => {
+  RequireSession();
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
    account.Description = description; account.ChangedBy = user.Username; account.ChangedAt = DateTime.Now; account.Status = "C"; c.Update(account);
@@ -18,6 +19,7 @@ public sealed partial class AppDatabase
  {
   RequireCompany(companyId);
   await db.RunInTransactionAsync(c => {
+  RequireSession();
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
    if (c.Table<Account>().Any(a => a.CompanyId == companyId && a.ParentCode == account.Code) || c.Table<JournalLine>().Any(l => l.AccountId == id) || c.Table<ImportedBalance>().Any(b => b.AccountId == id)) throw new InvalidOperationException("No puede borrar una cuenta con subcuentas, movimientos o saldos importados.");
@@ -42,7 +44,7 @@ public sealed partial class AppDatabase
   if (journal == null || journal.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
   return await db.Table<JournalLine>().Where(l => l.JournalId == journalId).ToListAsync();
  }
- public async Task SaveJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines)
+ public async Task SaveJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines, string? draftId = null)
  {
   RequireCompany(companyId);
   var user = RequireSession();
@@ -57,11 +59,18 @@ public sealed partial class AppDatabase
    debit = checked(debit + line.DebitCents); credit = checked(credit + line.CreditCents);
   }
   if (debit != credit) throw new InvalidOperationException("La póliza no cuadra: los cargos y créditos deben ser iguales.");
+  Journal? committed = null;
   await db.RunInTransactionAsync(c => {
+  RequireSession();
    if (c.Find<Company>(companyId) == null) throw new InvalidOperationException("Contabilidad no disponible.");
+   if (draftId != null) {
+    var pending = c.Find<JournalDraft>(draftId);
+    if (pending == null || pending.UserId != user.UserId || pending.CompanyId != companyId || pending.JournalId != draft.Id) throw new InvalidOperationException("Borrador no disponible.");
+   }
    if (draft.Id != 0) {
     var existing = c.Find<Journal>(draft.Id);
     if (existing == null || existing.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
+    if (draftId != null && existing.ChangedAt != draft.ChangedAt) throw new InvalidOperationException("La póliza cambió desde que se inició el borrador. Revise la versión actual antes de aceptar.");
    }
    var accounts = c.Table<Account>().Where(a => a.CompanyId == companyId).ToList();
    foreach (var line in lines) {
@@ -74,12 +83,16 @@ public sealed partial class AppDatabase
    var record = new Journal { Id = draft.Id, CompanyId = companyId, Date = draft.Date.Date, Year = year, Month = draft.Date.Month, Type = type, Reference = reference, Concept = draft.Concept.Trim(), ChangedBy = user.Username, ChangedAt = DateTime.Now };
    if (record.Id == 0) c.Insert(record); else { c.Update(record); c.Execute("DELETE FROM JournalLine WHERE JournalId = ?", record.Id); }
    foreach (var line in lines) c.Insert(new JournalLine { JournalId = record.Id, AccountId = line.AccountId, Concept = line.Concept.Trim(), DebitCents = line.DebitCents, CreditCents = line.CreditCents });
+   if (draftId != null) c.Delete<JournalDraft>(draftId);
+   committed = record;
   });
+  draft.Id = committed!.Id; draft.ChangedAt = committed.ChangedAt;
  }
  public async Task DeleteJournal(int companyId, int id)
  {
   RequireCompany(companyId);
   await db.RunInTransactionAsync(c => {
+  RequireSession();
    var journal = c.Find<Journal>(id);
    if (journal == null || journal.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
    c.Execute("DELETE FROM JournalLine WHERE JournalId = ?", id); c.Delete(journal);

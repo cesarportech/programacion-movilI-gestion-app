@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 
 namespace GestionLibros.Views;
 
@@ -21,7 +21,7 @@ public class LoginPage : ContentPage
     private bool busy;
     private bool ready;
 
-    public LoginPage(AppDatabase database)
+    public LoginPage(AppDatabase database, string? reason = null)
     {
         this.database = database;
         Title = "Iniciar Sesion:";
@@ -63,6 +63,7 @@ public class LoginPage : ContentPage
         confirm.Completed += async (_, _) => await SignIn();
         Loaded += (_, _) => { if (Window != null) { LoginWindowLayout.Compact(Window, DialogHeight); username.Focus(); } };
         LayoutForm();
+        if (reason != null) ShowError(reason);
     }
 
     private double DialogHeight => 27 + (setup ? 190 : 142) + (message.IsVisible ? 54 : 0);

@@ -1,4 +1,4 @@
-using GestionLibros.Models;
+﻿using GestionLibros.Models;
 
 namespace GestionLibros.Views;
 
@@ -21,7 +21,7 @@ public partial class JournalEditor
         NavigationPage.SetHasNavigationBar(this, false);
         Title = $"Sistema de Contabilidad (GL 2000) - {company.Name} - [{(original.Id == 0 ? "Agregando un Asiento" : "Cambiando un Asiento")}]";
         Gl2000Chrome.ApplyMenus(this, OpenModule);
-        MenuBarItems[0].OfType<MenuFlyoutItem>().First(x => x.Text == "Salir").Command = new Command(async () => await Navigation.PopAsync());
+        MenuBarItems[0].OfType<MenuFlyoutItem>().First(x => x.Text == "Salir").Command = new Command(async () => await Leave());
         var menu = ClassicWorkspaceChrome.Menu(this, MenuBarItems.ToArray()); MenuBarItems.Clear();
         var tools = new HorizontalStackLayout { Spacing = 1, Padding = new Thickness(3, 2, 0, 0) };
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
@@ -123,12 +123,10 @@ public partial class JournalEditor
         var footer = new HorizontalStackLayout { HorizontalOptions = LayoutOptions.End, Spacing = 5, Padding = new Thickness(0, 2, 3, 0) };
         footer.Children.Add(JournalsPage.ActionButton("Aceptar", "gl_accept.png", () => Guard(async () =>
         {
-            if (date.Date == null) throw new InvalidOperationException("Indique una fecha.");
-            await db.SaveJournal(company.Id, new Journal { Id = original.Id, Date = date.Date.Value, Type = type.Text ?? "", Reference = reference.Text ?? "", Concept = concept.Text ?? "" }, lines);
-            await Navigation.PopAsync();
+            if (await SavePending()) await Navigation.PopAsync();
         }), 84));
-        footer.Children.Add(JournalsPage.ActionButton("Cancelar", "gl_exit.png", async () => await Navigation.PopAsync(), 86));
-        footer.Children.Add(JournalsPage.ActionButton("Ayuda", "gl_help.png", () => DisplayAlertAsync("Agregar un asiento", "Complete tipo, referencia, fecha y concepto. Agregue los movimientos; los cargos y créditos deben coincidir. Aceptar guarda la póliza y sus movimientos. Cancelar descarta los cambios de esta pantalla.", "Cerrar"), 84));
+        footer.Children.Add(JournalsPage.ActionButton("Cancelar", "gl_exit.png", Leave, 86));
+        footer.Children.Add(JournalsPage.ActionButton("Ayuda", "gl_help.png", () => DisplayAlertAsync("Agregar un asiento", "Complete tipo, referencia, fecha y concepto. Agregue los movimientos; los cargos y créditos deben coincidir. Aceptar guarda la póliza y sus movimientos. Al salir con cambios se ofrece Guardar, Descartar o Continuar editando. Los borradores se recuperan al volver a abrir Agregar o Cambiar; no afectan saldos.", "Cerrar"), 84));
         var body = new Grid { Padding = new Thickness(5, 4, 5, 0), RowSpacing = 0,
             RowDefinitions = { new RowDefinition(22), new RowDefinition(GridLength.Star), new RowDefinition(28) } };
         body.Add(tab, 0, 0); body.Add(new Border { Stroke = Colors.Gray, Padding = 0, StrokeThickness = 1, Content = pane }, 0, 1); body.Add(footer, 0, 2);
@@ -194,7 +192,7 @@ public partial class JournalEditor
 
     private Task OpenModule(string key) => Guard(async () =>
     {
-        if (key == "exit") { await Navigation.PopAsync(); return; }
+        if (key == "exit") { await Leave(); return; }
         if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
         await Gl2000Chrome.Navigate(this, db, company, original.Date.Year, original.Date.Month, key);
     });

@@ -1,13 +1,61 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using GestionLibros.Models;
 
 namespace GestionLibros.Data;
 
-// Remembered sessions: closing the window keeps the user signed in; only signing out ends it.
+// Remembered sessions share the same revocation, idle and absolute limits as open sessions.
 public sealed partial class AppDatabase
 {
     private string? tokenHash;
+    private long sessionVersion;
+    private DateTime sessionStartedUtc, lastActivityUtc;
+    public static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(8);
+    public static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(15);
+    public event EventHandler<string>? SessionInvalidated;
+
+    private void StartSession(LocalUser user, DateTime started, DateTime activity)
+    {
+        sessionVersion = user.SecurityVersion;
+        sessionStartedUtc = started; lastActivityUtc = activity;
+        session = new(user.Id, user.Username, user.IsMaster, user.CompanyId);
+    }
+
+    // Background checks do not renew activity. Every protected operation checks the stored user.
+    public UserSession ValidateSession(bool activity = false)
+    {
+        var current = session ?? throw new InvalidOperationException("Debe iniciar sesión.");
+        var connection = db.GetConnection();
+        using (connection.Lock())
+        {
+            var now = clock.GetUtcNow().UtcDateTime;
+            var user = connection.Find<LocalUser>(current.UserId);
+            var token = tokenHash == null ? null : connection.Table<SessionToken>().FirstOrDefault(t => t.TokenHash == tokenHash);
+            var reason = user == null || user.Disabled || user.SecurityVersion != sessionVersion ||
+                user.CompanyId != current.CompanyId || user.IsMaster != current.IsMaster ||
+                (tokenHash != null && (token == null || token.SecurityVersion != sessionVersion))
+                ? "Su acceso fue retirado o su contraseña cambió. Inicie sesión nuevamente."
+                : now < sessionStartedUtc || now - sessionStartedUtc >= SessionLifetime ||
+                  (token != null && now >= token.ExpiresAtUtc)
+                ? "La sesión venció después de 8 horas. Inicie sesión nuevamente."
+                : now < lastActivityUtc || now - lastActivityUtc >= IdleTimeout
+                ? "Sesión bloqueada por 15 minutos sin actividad. Inicie sesión nuevamente." : null;
+            if (reason != null)
+            {
+                if (tokenHash != null) connection.Execute("DELETE FROM SessionToken WHERE TokenHash = ?", tokenHash);
+                Logout();
+                SessionInvalidated?.Invoke(this, reason);
+                throw new InvalidOperationException(reason);
+            }
+            if (activity)
+            {
+                lastActivityUtc = now;
+                if (token != null) connection.Execute("UPDATE SessionToken SET LastUsedAt = ? WHERE Id = ?", now, token.Id);
+            }
+            return current;
+        }
+    }
+
 
     private static string Hash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
@@ -15,37 +63,50 @@ public sealed partial class AppDatabase
     // only keeps its hash, so reading the database file is not enough to sign in.
     public async Task<string> IssueToken()
     {
-        var user = RequireSession();
+        RequireSession();
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var now = DateTime.Now;
-        await db.InsertAsync(new SessionToken { UserId = user.UserId, TokenHash = Hash(token), CreatedAt = now, LastUsedAt = now });
-        tokenHash = Hash(token);
+        await db.RunInTransactionAsync(c =>
+        {
+            var user = RequireSession();
+            c.Insert(new SessionToken { UserId = user.UserId, TokenHash = Hash(token),
+                CreatedAt = sessionStartedUtc, LastUsedAt = lastActivityUtc,
+                SecurityVersion = sessionVersion, ExpiresAtUtc = sessionStartedUtc + SessionLifetime });
+            tokenHash = Hash(token);
+        });
         return token;
     }
 
-    // Restores the session of a token issued earlier. Returns false (and stays signed out) when the
-    // token was revoked, belongs to a deleted user or is not valid.
     public async Task<bool> Resume(string? token)
     {
-        session = null; tokenHash = null;
+        Logout();
         await Initialize();
         if (string.IsNullOrWhiteSpace(token) || token.Length > 200) return false;
         var hash = Hash(token);
-        var stored = await db.Table<SessionToken>().Where(t => t.TokenHash == hash).FirstOrDefaultAsync();
-        if (stored == null) return false;
-        var user = await db.FindAsync<LocalUser>(stored.UserId);
-        if (user == null) { await db.DeleteAsync(stored); return false; }
-        stored.LastUsedAt = DateTime.Now;
-        await db.UpdateAsync(stored);
-        session = new(user.Id, user.Username, user.IsMaster, user.CompanyId);
-        tokenHash = hash;
-        return true;
+        var resumed = false;
+        await db.RunInTransactionAsync(c =>
+        {
+            var stored = c.Table<SessionToken>().FirstOrDefault(t => t.TokenHash == hash);
+            if (stored == null) return;
+            var user = c.Find<LocalUser>(stored.UserId);
+            var now = clock.GetUtcNow().UtcDateTime;
+            if (user == null || user.Disabled || stored.SecurityVersion != user.SecurityVersion ||
+                now >= stored.ExpiresAtUtc || now < stored.CreatedAt || now < stored.LastUsedAt ||
+                now - stored.LastUsedAt >= IdleTimeout)
+            { c.Delete(stored); return; }
+            StartSession(user, stored.CreatedAt, now);
+            tokenHash = hash;
+            c.Execute("UPDATE SessionToken SET LastUsedAt = ? WHERE Id = ?", now, stored.Id);
+            resumed = true;
+        });
+        return resumed;
     }
 
     // Password recovery for someone with access to this computer (the database file lives in the
     // Windows profile). Only the local tool Tools/RestablecerContrasena calls it; the app never does.
     // It also revokes the user's remembered sessions.
-    public async Task ResetPassword(string username, string newPassword)
+    public Task ResetPassword(string username, string newPassword) => ResetPasswordCore(username, newPassword, false);
+
+    private async Task ResetPasswordCore(string username, string newPassword, bool requireMaster)
     {
         await Initialize();
         username = username.Trim().ToLowerInvariant();
@@ -56,7 +117,8 @@ public sealed partial class AppDatabase
         user.PasswordHash = replacement.PasswordHash;
         await db.RunInTransactionAsync(c =>
         {
-            c.Update(user);
+            if (requireMaster) RequireMaster();
+            c.Execute("UPDATE LocalUser SET Salt = ?, PasswordHash = ?, SecurityVersion = COALESCE(SecurityVersion, 0) + 1 WHERE Id = ?", user.Salt, user.PasswordHash, user.Id);
             c.Execute("DELETE FROM SessionToken WHERE UserId = ?", user.Id);
         });
     }

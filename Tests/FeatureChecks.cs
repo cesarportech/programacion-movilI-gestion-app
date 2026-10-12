@@ -66,6 +66,36 @@ static class FeatureChecks
         Check(incomeDoc.Rows.Last().Cells[1].Value == "UTILIDAD DEL EJERCICIO" && incomeDoc.Rows.Last().Cells[2].Value == "300.00" && incomeDoc.Rows.Last().Cells[3].Value == "600.00",
             "Estado de Resultados result: month 300.00, year 600.00");
 
+        // Regression: level limits presentation, never the financial totals or code-range totals.
+        string Amount(ReportDocument document, string label, int column = 2) =>
+            document.Rows.Single(r => r.Cells[1].Value == label).Cells[column].Value;
+        for (var level = 1; level <= 9; level++)
+        {
+            foreach (var includeZero in new[] { false, true })
+            {
+                var trial = await db.TrialBalance(c, 2026, 2, level, includeZero);
+                var sheet = ReportFormatter.BalanceSheet(trial);
+                Check(Amount(sheet, "Total ACTIVO") == "1800.00" && Amount(sheet, "Total PASIVO") == "200.00" &&
+                    Amount(sheet, "Total CAPITAL") == "1000.00" && Amount(sheet, "Utilidad del Ejercicio") == "600.00" &&
+                    Amount(sheet, "Total Pasivo y Capital") == "1800.00", $"Balance totals independent of level {level}, zero={includeZero}");
+                var saldos = ReportFormatter.AccountBalances(trial, "1", "1.9");
+                Check(Amount(saldos, "Total") == "1800.00", $"Saldos totals include hidden detail in range at level {level}, zero={includeZero}");
+                Check(Amount(ReportFormatter.AccountBalances(trial, "2", "2.9"), "Total") == "-200.00" &&
+                    Amount(ReportFormatter.AccountBalances(trial, "8", "9"), "Total") == "0.00" &&
+                    Amount(ReportFormatter.AccountBalances(trial, "", ""), "Total") == "0.00",
+                    $"Saldos respects credit, empty and full ranges at level {level}, zero={includeZero}");
+                Check(trial.Rows.All(r => r.Level <= level) && (level > 1 || !sheet.Rows.Any(r => r.Cells[0].Value == "1.1")),
+                    $"Balance presentation respects level {level}, zero={includeZero}");
+            }
+            var report = await db.IncomeStatement(c, 2026, 2, level);
+            var result = ReportFormatter.IncomeStatement(report);
+            Check(Amount(result, "Total INGRESOS") == "500.00" && Amount(result, "Total INGRESOS", 3) == "800.00" &&
+                Amount(result, "Total COSTOS Y GASTOS") == "200.00" && Amount(result, "UTILIDAD DEL EJERCICIO") == "300.00" &&
+                Amount(result, "UTILIDAD DEL EJERCICIO", 3) == "600.00", $"Income month and YTD totals independent of level {level}");
+            Check(report.Rows.All(r => r.Level <= level) && (level > 1 || !result.Rows.Any(r => r.Cells[0].Value == "4.1")),
+                $"Income presentation respects level {level}");
+        }
+
         var csv = CatalogCsv.Write(await db.Accounts(c));
         var parsed = CatalogCsv.Parse(csv);
         Check(parsed.Count == 10 && parsed.Single(a => a.Code == "1.1").ParentCode == "1", "Catalog CSV round-trips codes and parents");

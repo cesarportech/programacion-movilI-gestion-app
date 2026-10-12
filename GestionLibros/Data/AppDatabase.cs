@@ -1,4 +1,4 @@
-using GestionLibros.Models;
+﻿using GestionLibros.Models;
 using SQLite;
 using System.Security.Cryptography;
 namespace GestionLibros.Data;
@@ -9,7 +9,8 @@ public sealed partial class AppDatabase
  private bool ready;
  private UserSession? session;
  public UserSession? Session => session;
- public AppDatabase(string path) => db = new SQLiteAsyncConnection(path);
+ private readonly TimeProvider clock;
+ public AppDatabase(string path, TimeProvider? clock = null) { db = new SQLiteAsyncConnection(path); this.clock = clock ?? TimeProvider.System; }
  private async Task Initialize()
  {
   await gate.WaitAsync();
@@ -19,6 +20,7 @@ public sealed partial class AppDatabase
    await db.CreateTableAsync<LocalUser>();
    await db.CreateTableAsync<Account>();
    await db.CreateTableAsync<Journal>();
+   await db.CreateTableAsync<JournalDraft>();
    await db.CreateTableAsync<JournalLine>();
    await db.CreateTableAsync<ImportedBalance>();
    await db.CreateTableAsync<SessionToken>();
@@ -54,14 +56,14 @@ public sealed partial class AppDatabase
   await Initialize();
   username = username.Trim().ToLowerInvariant();
   var user = await db.Table<LocalUser>().Where(u => u.Username == username).FirstOrDefaultAsync();
-  if (user == null) throw new InvalidOperationException("Usuario o contraseña incorrectos.");
+  if (user == null || user.Disabled) throw new InvalidOperationException("Usuario o contraseña incorrectos.");
   var hash = Rfc2898DeriveBytes.Pbkdf2(password, Convert.FromBase64String(user.Salt), 210000, HashAlgorithmName.SHA256, 32);
   if (!CryptographicOperations.FixedTimeEquals(hash, Convert.FromBase64String(user.PasswordHash))) throw new InvalidOperationException("Usuario o contraseña incorrectos.");
-  session = new(user.Id, user.Username, user.IsMaster, user.CompanyId);
+  StartSession(user, clock.GetUtcNow().UtcDateTime, clock.GetUtcNow().UtcDateTime);
  }
  // Clears the in-memory session only; SignOut also revokes the remembered token.
  public void Logout() { session = null; tokenHash = null; }
- private UserSession RequireSession() => session ?? throw new InvalidOperationException("Debe iniciar sesión.");
+ private UserSession RequireSession() => ValidateSession(true);
  private void RequireMaster() { if (!RequireSession().IsMaster) throw new InvalidOperationException("Solo el usuario maestro puede administrar usuarios y contabilidades."); }
  // Each accounting is only reachable by the user assigned to it. The master administers companies
  // and users but never opens an accounting: to see one, sign in with that company's user.
@@ -81,7 +83,7 @@ public sealed partial class AppDatabase
   RequireMaster(); name = name.Trim();
   if (name.Length == 0 || name.Length > 120) throw new InvalidOperationException("Escriba un nombre de contabilidad de hasta 120 caracteres.");
   if (await db.Table<Company>().Where(c => c.Name == name).CountAsync() > 0) throw new InvalidOperationException("Esta contabilidad ya existe.");
-  await db.InsertAsync(new Company { Name = name });
+  await db.RunInTransactionAsync(c => { RequireMaster(); c.Insert(new Company { Name = name }); });
  }
  public async Task AddUser(string username, string password, int companyId)
  {
@@ -89,7 +91,7 @@ public sealed partial class AppDatabase
   if (await db.FindAsync<Company>(companyId) == null) throw new InvalidOperationException("Seleccione una contabilidad válida.");
   var user = NewUser(username, password, false, companyId);
   if (await db.Table<LocalUser>().Where(u => u.Username == user.Username).CountAsync() > 0) throw new InvalidOperationException("Este usuario ya existe.");
-  await db.InsertAsync(user);
+  await db.RunInTransactionAsync(c => { RequireMaster(); c.Insert(user); });
  }
  public async Task<List<string>> Users()
  {
@@ -116,6 +118,6 @@ public sealed partial class AppDatabase
   if (parent != null && await db.Table<JournalLine>().Where(l => l.AccountId == parent.Id).CountAsync() > 0) throw new InvalidOperationException("No puede agregar subcuentas a una cuenta con movimientos.");
   var level = parent == null ? 1 : parent.Level + 1;
   if (level > 9) throw new InvalidOperationException("El catálogo admite hasta 9 niveles en esta versión de prueba.");
-  await db.InsertAsync(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now });
+  await db.RunInTransactionAsync(c => { RequireCompany(companyId); c.Insert(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now }); });
  }
 }

@@ -1,4 +1,4 @@
-# FREDI Contabilidad
+﻿# FREDI Contabilidad
 
 Aplicación .NET MAUI 10 con SQLite local. El proyecto técnico conserva el nombre GestionLibros; el ejemplo de libros fue reemplazado. Se conserva la base fredi-pruebas-v1.db3 y las tablas existentes; las tablas Journal y JournalLine se agregan automáticamente sin borrar usuarios, contabilidades ni cuentas.
 
@@ -36,7 +36,11 @@ Las tablas amarillas, encabezados azules, formularios verdes, nombres y organiza
 
 La base se guarda en FileSystem.AppDataDirectory. Diferentes usuarios de la aplicación comparten datos en la misma instalación y perfil de Windows. Otros equipos o perfiles tienen bases independientes. No compartir SQLite por red. La API y base central son necesarias para uso distribuido. Quien tenga acceso al archivo local puede leerlo directamente.
 
-Sesión recordada: al iniciar sesión se crea un token aleatorio de 256 bits. El equipo lo guarda en SecureStorage (en Windows, cifrado para el usuario de Windows) y la base solo guarda su SHA-256 (tabla SessionToken). Cerrar la ventana o Salir conserva la sesión; Archivos → Cerrar Sesión borra el token del equipo y de la base. El token no caduca por tiempo.
+Sesión recordada: al iniciar sesión se crea un token aleatorio de 256 bits. El equipo lo guarda en SecureStorage (en Windows, cifrado para el usuario de Windows) y la base solo guarda su SHA-256 (tabla SessionToken). Cerrar la ventana o Salir permite recuperar la sesión únicamente mientras siga vigente; Archivos → Cerrar Sesión borra el token del equipo y de la base. La duración máxima es de 8 horas desde el login y el bloqueo por inactividad ocurre a los 15 minutos. Reabrir no reinicia las 8 horas. Los tokens anteriores a esta actualización exigen un nuevo login.
+
+Cada operación protegida verifica el usuario almacenado, su versión de seguridad y los plazos de sesión; las escrituras transaccionales vuelven a verificar antes de guardar. Cambiar contraseña (también mediante la herramienta de recuperación), suspender o eliminar al usuario invalida sus sesiones abiertas. Suspender / Activar está disponible para el maestro en Usuarios; reactivar exige un login nuevo.
+
+La ventana revisa la vigencia cada 5 segundos y al recuperar el foco, sin renovar la actividad. Ante revocación o vencimiento se limpia el token y se vuelve al login; los cambios sin guardar se descartan. En Windows, las pulsaciones de teclado y clics renuevan la actividad, además de las operaciones protegidas. En otras plataformas, la actividad se registra al operar; la captura de entrada nativa se implementó para Windows. Leer sin interactuar durante 15 minutos también bloquea la sesión. Los controles de acceso operan sobre la misma base local compartida por las instancias: copias independientes no comparten revocaciones.
 
 Contraseñas con PBKDF2 SHA-256 y sal aleatoria. No hay contraseñas predeterminadas. C:/Sistemas nunca se modifica.
 
@@ -51,7 +55,9 @@ Utilerías → Importar Catálogo GL2000 lista los catálogos CAT<empresa><año>
 - Con catálogos de un ejercicio (CAT<empresa><año>.Tps) también se importan los acumulados: saldo inicial del año y cargos/créditos de cada mes (tabla ImportedBalance). Reimportar el mismo año reemplaza esos acumulados. Los catálogos plantilla (CATEMP…) solo traen cuentas.
 - Consulta y Balanza suman los acumulados del último ejercicio importado (≤ año consultado) a los movimientos capturados en FREDI. Saldo inicial del mes = saldo inicial del año + meses anteriores.
 - Cada cuenta importada muestra su propio acumulado del GL, también las superiores, porque el GL no siempre mantiene una cuenta superior igual a la suma de sus subcuentas (p. ej. 1.14900 en la empresa 003). Las superiores sin acumulado propio suman a sus subcuentas.
-- El Mayor todavía solo muestra movimientos capturados en FREDI; no incluye los acumulados importados.
+- Consulta, Mayor individual, Auxiliares y Balanza usan el mismo cálculo de saldos locales e importados. Los acumulados GL2000 se identifican por mes/año, sin inventar partidas diarias.
+- Fechas parciales: si el rango corta un mes con actividad importada, se solicita el mes completo. Sin actividad importada en ese mes se permiten fechas exactas. Con saldos importados, consulte un ejercicio por vez; cada apertura anual puede reemplazar el historial previo.
+- Los acumulados propios de una cuenta superior prevalecen sobre los de sus descendientes; las partidas locales se suman por la jerarquía real. Los saldos intermedios antes del acumulado mensual no son saldos diarios completos.
 - No se importan las pólizas del GL2000. Empresas.Tps está cifrado y no se lee.
 
 ## Ejecutar

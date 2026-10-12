@@ -1,4 +1,4 @@
-using SQLite;
+﻿using SQLite;
 namespace GestionLibros.Models;
 public class Company
 {
@@ -8,6 +8,8 @@ public class Company
 }
 public class LocalUser
 {
+ public bool Disabled { get; set; }
+ public long SecurityVersion { get; set; }
  [PrimaryKey, AutoIncrement] public int Id { get; set; }
  [Unique] public string Username { get; set; } = "";
  public string PasswordHash { get; set; } = "";
@@ -36,7 +38,8 @@ public class PolicyType
  public string Code { get; set; } = "";
  public string Description { get; set; } = "";
 }
-public record UserInfo(int Id, string Username, bool IsMaster, int CompanyId, string CompanyName);
+public record UserInfo(int Id, string Username, bool IsMaster, int CompanyId, string CompanyName, bool Disabled = false)
+{ public string DisplayUsername => Username + (Disabled ? " (Suspendido)" : ""); }
 public record SessionInfo(string Username, bool IsMaster, DateTime CreatedAt, DateTime LastUsedAt);
 // One movement of a printed póliza, with its account resolved.
 public record PolicyPrintLine(string AccountCode, string AccountName, string Concept, long Debits, long Credits);
@@ -44,6 +47,8 @@ public record PolicyPrint(Journal Journal, string TypeName, IReadOnlyList<Policy
 // Remembered sign-in. Only the SHA-256 of the token is stored; the token itself stays on the device.
 public class SessionToken
 {
+ public long SecurityVersion { get; set; }
+ public DateTime ExpiresAtUtc { get; set; }
  [PrimaryKey, AutoIncrement] public int Id { get; set; }
  [Indexed] public int UserId { get; set; }
  [Unique] public string TokenHash { get; set; } = "";
@@ -90,3 +95,15 @@ public record BalanceRow(string Code, string Description, int Level, long Openin
 {
  public long Closing => checked(Opening + Debits - Credits);
 }
+// Drafts are deliberately separate from Journal/JournalLine: reports never read them.
+public class JournalDraft
+{
+ [PrimaryKey] public string Id { get; set; } = "";
+ public int UserId { get; set; }
+ public int CompanyId { get; set; }
+ public int JournalId { get; set; }
+ public DateTime UpdatedUtc { get; set; }
+ public string Payload { get; set; } = "";
+}
+public record MovementDraft(string Account, string Concept, string Value, int Index);
+public record JournalDraftContent(Journal Header, List<JournalLine> Lines, MovementDraft? Movement);

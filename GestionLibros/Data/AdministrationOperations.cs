@@ -1,4 +1,4 @@
-using GestionLibros.Models;
+﻿using GestionLibros.Models;
 
 namespace GestionLibros.Data;
 
@@ -20,6 +20,7 @@ public sealed partial class AppDatabase
         if (description.Length == 0 || description.Length > 80) throw new InvalidOperationException("Indique una descripción de hasta 80 caracteres.");
         await db.RunInTransactionAsync(c =>
         {
+            RequireSession();
             if (c.Find<Company>(companyId) == null) throw new InvalidOperationException("Contabilidad no disponible.");
             var existing = c.Table<PolicyType>().FirstOrDefault(t => t.CompanyId == companyId && t.Code == code);
             if (existing == null) c.Insert(new PolicyType { CompanyId = companyId, Code = code, Description = description });
@@ -32,6 +33,7 @@ public sealed partial class AppDatabase
         RequireCompany(companyId);
         await db.RunInTransactionAsync(c =>
         {
+            RequireSession();
             var type = c.Table<PolicyType>().FirstOrDefault(t => t.CompanyId == companyId && t.Code == code)
                 ?? throw new InvalidOperationException("Tipo de póliza no disponible.");
             if (c.Table<Journal>().Any(j => j.CompanyId == companyId && j.Type == code))
@@ -79,7 +81,7 @@ public sealed partial class AppDatabase
         RequireMaster();
         var companies = (await db.Table<Company>().ToListAsync()).ToDictionary(c => c.Id, c => c.Name);
         return (await db.Table<LocalUser>().ToListAsync())
-            .Select(u => new UserInfo(u.Id, u.Username, u.IsMaster, u.CompanyId, u.IsMaster ? "Maestro" : companies.GetValueOrDefault(u.CompanyId, "?")))
+            .Select(u => new UserInfo(u.Id, u.Username, u.IsMaster, u.CompanyId, u.IsMaster ? "Maestro" : companies.GetValueOrDefault(u.CompanyId, "?"), u.Disabled))
             .OrderByDescending(u => u.IsMaster).ThenBy(u => u.CompanyName).ThenBy(u => u.Username).ToList();
     }
 
@@ -88,7 +90,20 @@ public sealed partial class AppDatabase
     {
         RequireMaster();
         var user = await db.FindAsync<LocalUser>(userId) ?? throw new InvalidOperationException("Usuario no disponible.");
-        await ResetPassword(user.Username, newPassword);
+        await ResetPasswordCore(user.Username, newPassword, true);
+    }
+
+    public async Task SetUserActive(int userId, bool active)
+    {
+        RequireMaster();
+        await db.RunInTransactionAsync(c =>
+        {
+            RequireMaster();
+            var user = c.Find<LocalUser>(userId) ?? throw new InvalidOperationException("Usuario no disponible.");
+            if (user.IsMaster) throw new InvalidOperationException("El maestro no se puede suspender.");
+            c.Execute("UPDATE LocalUser SET Disabled = ?, SecurityVersion = COALESCE(SecurityVersion, 0) + 1 WHERE Id = ?", !active, userId);
+            c.Execute("DELETE FROM SessionToken WHERE UserId = ?", userId);
+        });
     }
 
     // Removes an operator. The master cannot be removed; the company and its accounting stay.
@@ -97,6 +112,7 @@ public sealed partial class AppDatabase
         RequireMaster();
         await db.RunInTransactionAsync(c =>
         {
+            RequireSession();
             var user = c.Find<LocalUser>(userId) ?? throw new InvalidOperationException("Usuario no disponible.");
             if (user.IsMaster) throw new InvalidOperationException("El usuario maestro no se puede borrar.");
             c.Execute("DELETE FROM SessionToken WHERE UserId = ?", userId);
@@ -110,8 +126,8 @@ public sealed partial class AppDatabase
         RequireMaster();
         var users = (await db.Table<LocalUser>().ToListAsync()).ToDictionary(u => u.Id);
         return (await db.Table<SessionToken>().ToListAsync())
-            .Where(t => users.ContainsKey(t.UserId))
-            .Select(t => new SessionInfo(users[t.UserId].Username, users[t.UserId].IsMaster, t.CreatedAt, t.LastUsedAt))
+            .Where(t => users.TryGetValue(t.UserId, out var u) && !u.Disabled && u.SecurityVersion == t.SecurityVersion && t.ExpiresAtUtc > clock.GetUtcNow().UtcDateTime && clock.GetUtcNow().UtcDateTime - t.LastUsedAt < IdleTimeout)
+            .Select(t => new SessionInfo(users[t.UserId].Username, users[t.UserId].IsMaster, DateTime.SpecifyKind(t.CreatedAt, DateTimeKind.Utc).ToLocalTime(), DateTime.SpecifyKind(t.LastUsedAt, DateTimeKind.Utc).ToLocalTime()))
             .OrderByDescending(s => s.LastUsedAt).ToList();
     }
 

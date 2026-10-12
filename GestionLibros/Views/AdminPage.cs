@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 
 namespace GestionLibros.Views;
@@ -47,7 +47,7 @@ public class AdminPage : AccountingPage
 
         companies.ItemTemplate = Template(nameof(Company.Name), null);
         companies.SelectionChanged += (_, e) => { if (e.CurrentSelection.FirstOrDefault() is Company c) userCompany.SelectedItem = companyList.FirstOrDefault(x => x.Id == c.Id); };
-        users.ItemTemplate = Template(nameof(UserInfo.Username), nameof(UserInfo.CompanyName));
+        users.ItemTemplate = Template(nameof(UserInfo.DisplayUsername), nameof(UserInfo.CompanyName));
         users.SelectionChanged += (_, e) => SelectUser(e.CurrentSelection.FirstOrDefault() as UserInfo);
 
         var companyPanel = Panel("Contabilidades", companies, ["Contabilidad"],
@@ -60,6 +60,7 @@ public class AdminPage : AccountingPage
                 Row("Contraseña :", Box(password)), Row("Confirmar :", Box(confirmation)),
                 Buttons(JournalsPage.ActionButton("Agregar", "gl_add.png", () => Run(AddUser), 90),
                     JournalsPage.ActionButton("Contraseña", "gl_change.png", () => Run(ChangePassword), 110),
+                    JournalsPage.ActionButton("Suspender / Activar", "gl_exit.png", () => Run(ToggleUser), 130),
                     JournalsPage.ActionButton("Borrar", "gl_delete.png", () => Run(DeleteUser), 90)) } });
         var panels = new Grid { ColumnSpacing = 12, Padding = new Thickness(12),
             ColumnDefinitions = { new ColumnDefinition(new GridLength(2, GridUnitType.Star)), new ColumnDefinition(new GridLength(3, GridUnitType.Star)) } };
@@ -124,6 +125,16 @@ public class AdminPage : AccountingPage
         password.Text = confirmation.Text = "";
     }
 
+    private async Task ToggleUser()
+    {
+        if (selectedUser == null) throw new InvalidOperationException("Seleccione un usuario de la lista.");
+        var user = selectedUser;
+        await db.SetUserActive(user.Id, user.Disabled);
+        status.Text = user.Disabled ? $"Usuario {user.Username} activado. Debe iniciar sesión nuevamente." : $"Usuario {user.Username} suspendido. Sus sesiones quedan invalidadas.";
+        selectedUser = null;
+        await Load();
+    }
+
     private async Task DeleteUser()
     {
         if (selectedUser == null) throw new InvalidOperationException("Seleccione un usuario de la lista.");
@@ -165,7 +176,7 @@ public class AdminPage : AccountingPage
     private async Task Run(Func<Task> work)
     {
         status.TextColor = Colors.Black;
-        try { await work(); }
+        try { db.ValidateSession(true); await work(); }
         catch (InvalidOperationException ex) { status.TextColor = Gl2000Chrome.NegativeRed; status.Text = ex.Message; }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); status.TextColor = Gl2000Chrome.NegativeRed; status.Text = "No se pudo completar la operación."; }
     }
