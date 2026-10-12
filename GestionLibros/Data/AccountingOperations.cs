@@ -1,4 +1,4 @@
-﻿using GestionLibros.Models;
+using GestionLibros.Models;
 namespace GestionLibros.Data;
 public sealed partial class AppDatabase
 {
@@ -10,6 +10,7 @@ public sealed partial class AppDatabase
   if (description.Length == 0 || description.Length > 200) throw new InvalidOperationException("Escriba una descripción de hasta 200 caracteres.");
   await db.RunInTransactionAsync(c => {
   RequireSession();
+   RequireMutableCatalog(c, companyId);
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
    account.Description = description; account.ChangedBy = user.Username; account.ChangedAt = DateTime.Now; account.Status = "C"; c.Update(account);
@@ -20,6 +21,7 @@ public sealed partial class AppDatabase
   RequireCompany(companyId);
   await db.RunInTransactionAsync(c => {
   RequireSession();
+   RequireMutableCatalog(c, companyId);
    var account = c.Find<Account>(id);
    if (account == null || account.CompanyId != companyId) throw new InvalidOperationException("Cuenta no disponible.");
    if (c.Table<Account>().Any(a => a.CompanyId == companyId && a.ParentCode == account.Code) || c.Table<JournalLine>().Any(l => l.AccountId == id) || c.Table<ImportedBalance>().Any(b => b.AccountId == id)) throw new InvalidOperationException("No puede borrar una cuenta con subcuentas, movimientos o saldos importados.");
@@ -44,7 +46,24 @@ public sealed partial class AppDatabase
   if (journal == null || journal.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
   return await db.Table<JournalLine>().Where(l => l.JournalId == journalId).ToListAsync();
  }
- public async Task SaveJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines, string? draftId = null)
+ // Resolve by persisted IDs, never by a displayed reference or row position.
+ public async Task<Journal> JournalForMovement(int companyId, int journalId, int lineId)
+ {
+  RequireCompany(companyId);
+  if (journalId <= 0 || lineId <= 0) throw new InvalidOperationException("Este importe es un acumulado sin póliza individual.");
+  Journal? result = null;
+  await db.RunInTransactionAsync(c =>
+  {
+   RequireCompany(companyId);
+   var header = c.Find<Journal>(journalId);
+   var line = c.Find<JournalLine>(lineId);
+   if (header == null || header.CompanyId != companyId || line == null || line.JournalId != journalId || c.Find<Account>(line.AccountId)?.CompanyId != companyId)
+    throw new InvalidOperationException("El movimiento cambió o ya no está disponible. Vuelva a consultar la cuenta.");
+   result = header;
+  });
+  return result!;
+ }
+ public async Task SaveJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines, string? draftId = null, long? draftRevision = null)
  {
   RequireCompany(companyId);
   var user = RequireSession();
@@ -62,14 +81,19 @@ public sealed partial class AppDatabase
   Journal? committed = null;
   await db.RunInTransactionAsync(c => {
   RequireSession();
+   ValidateMigrationState(c, companyId);
+   var cut = c.Find<MigrationPolicy>(companyId);
+   if (cut != null && draft.Date.Date <= cut.LegacyThrough) throw new InvalidOperationException($"FREDI comienza el {cut.LegacyThrough.AddDays(1):dd/MM/yyyy}. Las fechas anteriores corresponden a migración, no a captura local.");
    if (c.Find<Company>(companyId) == null) throw new InvalidOperationException("Contabilidad no disponible.");
    if (draftId != null) {
     var pending = c.Find<JournalDraft>(draftId);
+    if (pending != null && draftRevision != null && pending.Revision != draftRevision) throw new InvalidOperationException("El borrador cambió antes de aceptar. Revise la versión actual.");
     if (pending == null || pending.UserId != user.UserId || pending.CompanyId != companyId || pending.JournalId != draft.Id) throw new InvalidOperationException("Borrador no disponible.");
    }
    if (draft.Id != 0) {
     var existing = c.Find<Journal>(draft.Id);
     if (existing == null || existing.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
+    if (!string.IsNullOrEmpty(existing.ImportBatchId)) throw new InvalidOperationException("El detalle histórico pertenece a un lote y no se puede editar como póliza local.");
     if (draftId != null && existing.ChangedAt != draft.ChangedAt) throw new InvalidOperationException("La póliza cambió desde que se inició el borrador. Revise la versión actual antes de aceptar.");
    }
    var accounts = c.Table<Account>().Where(a => a.CompanyId == companyId).ToList();
@@ -95,14 +119,16 @@ public sealed partial class AppDatabase
   RequireSession();
    var journal = c.Find<Journal>(id);
    if (journal == null || journal.CompanyId != companyId) throw new InvalidOperationException("Póliza no disponible.");
+   if (!string.IsNullOrEmpty(journal.ImportBatchId)) throw new InvalidOperationException("El detalle histórico pertenece a un lote y no se puede borrar individualmente.");
    c.Execute("DELETE FROM JournalLine WHERE JournalId = ?", id); c.Delete(journal);
   });
  }
- public async Task<List<BalanceRow>> Balances(int companyId, int year, int month)
+ public async Task<List<BalanceRow>> Balances(int companyId, int year, int month, ConsultationSource source = ConsultationSource.Reconciled)
  {
   RequireCompany(companyId);
   var start = PeriodStart(year, month);
-  var snapshot = await ReadReportSnapshot(companyId, start.AddMonths(1));
+  var snapshot = await ReadReportSnapshot(companyId, start.AddMonths(1), source);
   return BuildBalances(snapshot, start);
  }
 }
+

@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 
 namespace GestionLibros.Views;
@@ -250,6 +250,7 @@ internal static class Gl2000Chrome
         U("Concentrar Movimientos");
         U("Borrar Saldos Anteriores");
         U("Exportar Saldos Iniciales");
+        U("Corte y lotes de migración", () => Go("migration", "Corte y lotes de migración"));
         U("Importar Saldos Iniciales");
         var recuperacion = new MenuFlyoutSubItem { Text = "Recuperación de Datos" };
         recuperacion.Add(new MenuFlyoutItem { Text = "Recuperar Todo", Command = new Command(async () => await page.DisplayAlertAsync("Recuperación de Datos", "Para recuperar un respaldo: cierre FREDI y reemplace el archivo fredi-pruebas-v1.db3 de la carpeta de datos por la copia de la carpeta Respaldos (Utilerías → Sistema de Respaldos).", "Entendido")) });

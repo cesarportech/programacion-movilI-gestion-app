@@ -155,7 +155,7 @@ public static class ReportFormatter
             }
             rows.Add(new([T(account.Code), T(account.Description), T(""), T(""), T("SALDO ANTERIOR:"), .. Side(account.Opening)]));
             rows.AddRange(account.Movements.Select(m => new ReportRow([T(""), T(""), T(m.Date.ToString(m.IsImported ? "MM/yyyy" : "d/M/yyyy", CultureInfo.InvariantCulture)),
-                T($"{m.Type}  {m.Reference}".Trim()), T(m.Concept), M(m.Debits), M(m.Credits)])));
+                T($"{m.Type}  {m.Reference}".Trim()), T(m.Concept + (m.Origin.Length == 0 ? "" : $" [{m.Origin}]")), M(m.Debits), M(m.Credits)])));
             rows.Add(new([T(""), T(""), T(""), T(""), T("Total Cargos / Créditos :"), M(account.Debits), M(account.Credits)], true));
             rows.Add(new([T(""), T(""), T(""), T(""), T("SALDO ACTUAL:"), .. Side(account.Closing)]));
         }
@@ -164,20 +164,20 @@ public static class ReportFormatter
         return new("Reporte de Mayor", report.CompanyName, period, range,
             new[] { "Cuenta", "Descripción", "Fecha", "Referencia", "Concepto", "Cargos", "Créditos" }, rows,
             "Saldos: deudor en Cargos, acreedor en Créditos. Las partidas son las pólizas capturadas en FREDI; " +
-            "los importes importados del GL2000 aparecen como un acumulado por mes, sin detalle diario.");
+            "los importes importados del GL2000 aparecen como un acumulado por mes, sin detalle diario. " + string.Join(" ", report.Accounts.Select(a => a.OriginNote).Distinct()));
     }
 
     public static ReportDocument Ledger(LedgerReport report)
     {
         var rows = new List<ReportRow> { new(new[] { T(""), T(""), T(report.AccountCode), T("Saldo inicial"), M(0), M(0), M(report.Opening) }, true) };
         rows.AddRange(report.Rows.Select(r => new ReportRow(new[] { T(r.Date.ToString(r.IsImported ? "MM/yyyy" : "dd/MM/yyyy", CultureInfo.InvariantCulture)),
-            T(r.IsImported ? "GL2000" : $"{r.Type}-{r.Reference}"), T(r.AccountCode), T(r.Concept), M(r.Debits), M(r.Credits), M(r.Balance) })));
+            T(r.IsImported ? "GL2000" : $"{r.Type}-{r.Reference}"), T(r.AccountCode), T(r.Concept + (r.Origin.Length == 0 ? "" : $" [{r.Origin}]")), M(r.Debits), M(r.Credits), M(r.Balance) })));
         rows.Add(new(new[] { T("TOTAL"), T(""), T(""), T("Movimientos del período / saldo final"), M(report.Debits), M(report.Credits), M(report.Closing) }, true));
         return new("Mayor de Cuenta", report.CompanyName, $"{report.From:dd/MM/yyyy} al {report.Through:dd/MM/yyyy}",
             $"Cuenta: {report.AccountCode} - {report.AccountName}. Subcuentas: {(report.IncludesChildren ? "incluidas" : "excluidas")}",
             new[] { "Fecha", "Póliza", "Cuenta", "Concepto", "Cargos", "Créditos", "Saldo" }, rows,
             "Saldo deudor positivo y acreedor negativo. El saldo inicial incluye movimientos anteriores al rango. " +
-            (report.HasImportedBalances ? "Incluye saldos GL2000 y acumulados mensuales identificados, sin detalle diario. Los acumulados se muestran al cierre de cada mes; los saldos intermedios no representan saldos diarios completos. Consulte meses completos con actividad importada y un ejercicio a la vez. Las cuentas superiores conservan sus acumulados propios cuando existen." : "Incluye pólizas registradas en FREDI, ordenadas por fecha, tipo, referencia y claves de póliza/movimiento."));
+            (report.HasImportedBalances ? "Incluye saldos GL2000 y acumulados mensuales identificados, sin detalle diario. Los acumulados se muestran al cierre de cada mes; los saldos intermedios no representan saldos diarios completos. Consulte meses completos con actividad importada y un ejercicio a la vez. Las cuentas superiores conservan sus acumulados propios cuando existen." : "Incluye pólizas registradas en FREDI, ordenadas por fecha, tipo, referencia y claves de póliza/movimiento.") + " " + report.OriginNote);
     }
 
     public static ReportDocument Balances(string company, int year, int month, string filter, IReadOnlyList<BalanceRow> balances)

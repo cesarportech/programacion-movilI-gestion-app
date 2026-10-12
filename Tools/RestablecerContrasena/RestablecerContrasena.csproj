@@ -13,5 +13,5 @@
     <Compile Include="../../GestionLibros/Data/LedgerCalculator.cs;../../GestionLibros/Data/AppDatabase.cs;../../GestionLibros/Data/AccountingOperations.cs;../../GestionLibros/Data/ReportingOperations.cs;../../GestionLibros/Data/ImportOperations.cs;../../GestionLibros/Data/SessionOperations.cs;../../GestionLibros/Data/AdministrationOperations.cs" LinkBase="Data" />
     <Compile Include="../../GestionLibros/Data/Import/*.cs" LinkBase="Data/Import" />
     <Compile Include="../../GestionLibros/Reporting/ReportFormatter.cs" LinkBase="Reporting" />
-  <Compile Include="../../GestionLibros/Data/DraftOperations.cs" Link="DraftOperations.cs" /></ItemGroup>
+  <Compile Include="../../GestionLibros/Data/DraftOperations.cs" Link="DraftOperations.cs" /><Compile Include="../../GestionLibros/Data/MigrationOperations.cs" Link="MigrationOperations.cs" /></ItemGroup>
 </Project>

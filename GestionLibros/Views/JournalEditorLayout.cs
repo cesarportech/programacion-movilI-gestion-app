@@ -19,7 +19,7 @@ public partial class JournalEditor
     private void BuildClassicEditor()
     {
         NavigationPage.SetHasNavigationBar(this, false);
-        Title = $"Sistema de Contabilidad (GL 2000) - {company.Name} - [{(original.Id == 0 ? "Agregando un Asiento" : "Cambiando un Asiento")}]";
+        Title = $"Sistema de Contabilidad (GL 2000) - {company.Name} - [{(viewOnly ? "Consultando un Asiento" : original.Id == 0 ? "Agregando un Asiento" : "Cambiando un Asiento")}]";
         Gl2000Chrome.ApplyMenus(this, OpenModule);
         MenuBarItems[0].OfType<MenuFlyoutItem>().First(x => x.Text == "Salir").Command = new Command(async () => await Leave());
         var menu = ClassicWorkspaceChrome.Menu(this, MenuBarItems.ToArray()); MenuBarItems.Clear();
@@ -42,7 +42,7 @@ public partial class JournalEditor
         foreach (var (caption, y) in new[] { ("Tipo de Póliza:", 8d), ("Referencia:", 31d), ("Fecha:", 54d), ("Concepto:", 79d) })
             Put(BlueText(caption), 10, y, 84, 20);
         Put(CompactField(type, Gl2000Chrome.RowYellow), 94, 8, 40, 20);
-        Put(JournalsPage.ActionButton("", "gl_search.png", () => Guard(FindType), 24), 138, 6, 24, 24);
+        Put(JournalsPage.ActionButton("", "gl_search.png", () => viewOnly ? Task.CompletedTask : Guard(FindType), 24), 138, 6, 24, 24);
         typeName.TextColor = Colors.Blue; Put(typeName, 168, 8, 220, 20);
         type.TextChanged += (_, _) => ShowTypeName();
         Put(CompactField(reference, Gl2000Chrome.RowYellow), 94, 31, 100, 20);
@@ -107,6 +107,7 @@ public partial class JournalEditor
             if (await DisplayAlertAsync("Quitar movimiento", "¿Quitar el movimiento de esta póliza? Se guardará al aceptar la póliza.", "Quitar", "Cancelar"))
             { lines.Remove(selected); selected = null; Render(); }
         }), 88));
+        edits.IsVisible = !viewOnly;
         actions.Add(edits, 0, 0);
         sums.FontFamily = "Arial"; sums.FontSize = 11; sums.TextColor = Colors.Blue;
         actions.Add(sums, 1, 0);
@@ -121,9 +122,9 @@ public partial class JournalEditor
         var tab = new Border { HorizontalOptions = LayoutOptions.Start, WidthRequest = 55, BackgroundColor = Color.FromArgb("#91F4CE"),
             Stroke = Colors.Gray, StrokeThickness = 1, Padding = new Thickness(3, 0), Content = ClassicWorkspaceChrome.Text("General", true) };
         var footer = new HorizontalStackLayout { HorizontalOptions = LayoutOptions.End, Spacing = 5, Padding = new Thickness(0, 2, 3, 0) };
-        footer.Children.Add(JournalsPage.ActionButton("Aceptar", "gl_accept.png", () => Guard(async () =>
+        footer.Children.Add(JournalsPage.ActionButton(viewOnly ? "Volver" : "Aceptar", "gl_accept.png", () => Guard(async () =>
         {
-            if (await SavePending()) await Navigation.PopAsync();
+            if (viewOnly || await SavePending()) await Navigation.PopAsync();
         }), 84));
         footer.Children.Add(JournalsPage.ActionButton("Cancelar", "gl_exit.png", Leave, 86));
         footer.Children.Add(JournalsPage.ActionButton("Ayuda", "gl_help.png", () => DisplayAlertAsync("Agregar un asiento", "Complete tipo, referencia, fecha y concepto. Agregue los movimientos; los cargos y créditos deben coincidir. Aceptar guarda la póliza y sus movimientos. Al salir con cambios se ofrece Guardar, Descartar o Continuar editando. Los borradores se recuperan al volver a abrir Agregar o Cambiar; no afectan saldos.", "Cerrar"), 84));

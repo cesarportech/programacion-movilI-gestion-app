@@ -1,10 +1,85 @@
-﻿using GestionLibros.Models;
+using GestionLibros.Models;
 
 namespace GestionLibros.Data;
 
 // Tipos de Pólizas, Duplicar e Impresión de Pólizas, Usuarios Conectados and Sistema de Respaldos.
 public sealed partial class AppDatabase
 {
+    public async Task<List<CatalogPackage>> CatalogPackages()
+    {
+        RequireSession();
+        return await db.Table<CatalogPackage>().OrderBy(p => p.Name).ToListAsync();
+    }
+
+    public async Task DeleteCatalogPackage(int id)
+    {
+        RequireMaster();
+        await db.RunInTransactionAsync(c =>
+        {
+            RequireMaster();
+            var package = c.Find<CatalogPackage>(id) ?? throw new InvalidOperationException("El catálogo ya no existe.");
+            if (c.Table<Company>().Any(x => x.CatalogPackageId == id))
+                throw new InvalidOperationException("Este catálogo está asignado a una contabilidad y no se puede eliminar. Puede precargar otro catálogo para contabilidades nuevas.");
+            c.Delete(package);
+        });
+    }
+    public async Task<int> PreloadCatalog(string name, IReadOnlyList<CatalogAccount> accounts)
+    {
+        RequireMaster(); name = name.Trim();
+        if (name.Length == 0 || name.Length > 120) throw new InvalidOperationException("Indique un nombre de catálogo de hasta 120 caracteres.");
+        var clean = accounts.Select(a => new CatalogAccount(a.Code.Trim(), a.ParentCode.Trim(), a.Description.Trim())).ToList();
+        ValidateCatalogPackage(clean);
+        var package = new CatalogPackage { Name = name, Payload = System.Text.Json.JsonSerializer.Serialize(clean), CreatedBy = RequireSession().Username, CreatedUtc = DateTime.UtcNow };
+        await db.RunInTransactionAsync(c =>
+        {
+            RequireMaster();
+            if (c.Table<CatalogPackage>().Any(p => p.Name == name)) throw new InvalidOperationException("Ese catálogo ya existe. Use otro nombre para una versión nueva.");
+            c.Insert(package);
+        });
+        return package.Id;
+    }
+
+    public async Task<int> CreateCompanyFromCatalog(string name, int packageId)
+    {
+        RequireMaster(); name = name.Trim();
+        if (name.Length == 0 || name.Length > 120) throw new InvalidOperationException("Indique un nombre de contabilidad de hasta 120 caracteres.");
+        var company = new Company { Name = name, CatalogPackageId = packageId };
+        await db.RunInTransactionAsync(c =>
+        {
+            RequireMaster();
+            var package = c.Find<CatalogPackage>(packageId) ?? throw new InvalidOperationException("Seleccione un catálogo precargado.");
+            if (c.Table<Company>().Any(x => x.Name == name)) throw new InvalidOperationException("Esta contabilidad ya existe.");
+            var accounts = System.Text.Json.JsonSerializer.Deserialize<List<CatalogAccount>>(package.Payload) ?? throw new InvalidOperationException("Catálogo vacío.");
+            ValidateCatalogPackage(accounts);
+            var map = accounts.ToDictionary(a => a.Code);
+            c.Insert(company);
+            foreach (var account in accounts)
+            {
+                int level = 1; var current = account;
+                while (current.ParentCode.Length > 0) { current = map[current.ParentCode]; level++; }
+                c.Insert(new Account { CompanyId = company.Id, Code = account.Code, ParentCode = account.ParentCode,
+                    Description = account.Description, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now });
+            }
+        });
+        return company.Id;
+    }
+    private static void ValidateCatalogPackage(IReadOnlyList<CatalogAccount> accounts)
+    {
+        if (accounts.Count == 0 || accounts.Any(a => a.Code.Length == 0 || a.Code.Length > 40 || a.Description.Length == 0 || a.Description.Length > 200))
+            throw new InvalidOperationException("El catálogo debe contener cuentas con código y descripción válidos.");
+        if (accounts.Select(a => a.Code).Distinct().Count() != accounts.Count) throw new InvalidOperationException("El catálogo contiene códigos repetidos.");
+        var map = accounts.ToDictionary(a => a.Code);
+        foreach (var account in accounts)
+        {
+            var seen = new HashSet<string>(); var current = account;
+            while (true)
+            {
+                if (!seen.Add(current.Code) || seen.Count > 9) throw new InvalidOperationException("Jerarquía circular o mayor de 9 niveles.");
+                if (current.ParentCode.Length == 0) break;
+                if (!map.TryGetValue(current.ParentCode, out current!)) throw new InvalidOperationException("Falta una cuenta superior en el catálogo.");
+            }
+        }
+    }
     public Task<List<PolicyType>> PolicyTypes(int companyId)
     {
         RequireCompany(companyId);
@@ -142,3 +217,6 @@ public sealed partial class AppDatabase
         return file;
     }
 }
+
+
+

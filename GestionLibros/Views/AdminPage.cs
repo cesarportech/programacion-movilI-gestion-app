@@ -1,4 +1,4 @@
-﻿using GestionLibros.Data;
+using GestionLibros.Data;
 using GestionLibros.Models;
 
 namespace GestionLibros.Views;
@@ -10,6 +10,7 @@ public class AdminPage : AccountingPage
     private readonly AppDatabase db;
     private readonly CollectionView companies = List();
     private readonly CollectionView users = List();
+    private readonly Picker catalog = new() { Title = "Seleccione catálogo definitivo", FontSize = 11, TextColor = Colors.Black, BackgroundColor = Colors.White };
     private readonly Entry companyName = Field("Nueva contabilidad", 120);
     private readonly Entry username = Field("Usuario", 60);
     private readonly Entry password = Field("Contraseña", 100, secret: true);
@@ -30,6 +31,7 @@ public class AdminPage : AccountingPage
 
         // Master menu: only administration; no accounting modules.
         var archivos = new MenuBarItem { Text = "Archivos" };
+        archivos.Add(new MenuFlyoutItem { Text = "Catálogos precargados", Command = new Command(async () => await Run(ManageCatalogs)) });
         archivos.Add(new MenuFlyoutItem { Text = "Usuarios Conectados", Command = new Command(async () => await Run(ShowSessions)) });
         archivos.Add(new MenuFlyoutItem { Text = "Sistema de Respaldos", Command = new Command(async () => await Run(Backup)) });
         archivos.Add(new MenuFlyoutItem { Text = "Cerrar Sesión", Command = new Command(async () => await SessionActions.SignOut(this, db)) });
@@ -39,6 +41,7 @@ public class AdminPage : AccountingPage
         var menu = ClassicWorkspaceChrome.Menu(this, [archivos, ayuda]);
 
         var tools = new HorizontalStackLayout { Spacing = 1, Padding = new Thickness(3, 2, 0, 0) };
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Catálogos", "gl_catalog.png", () => Run(ManageCatalogs)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Conectados", "gl_query.png", () => Run(ShowSessions)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Respaldo", "gl_policy.png", () => Run(Backup)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Salir", "gl_exit.png", () => { CloseApp(); return Task.CompletedTask; }));
@@ -52,7 +55,7 @@ public class AdminPage : AccountingPage
 
         var companyPanel = Panel("Contabilidades", companies, ["Contabilidad"],
             new VerticalStackLayout { Spacing = 6, Children = {
-                Row("Nombre :", Box(companyName)),
+                Row("Nombre :", Box(companyName)), Row("Catálogo :", catalog),
                 Buttons(JournalsPage.ActionButton("Agregar", "gl_add.png", () => Run(AddCompany), 90)) } });
         var userPanel = Panel("Usuarios", users, ["Usuario", "Contabilidad"],
             new VerticalStackLayout { Spacing = 6, Children = {
@@ -81,6 +84,8 @@ public class AdminPage : AccountingPage
 
     private async Task Load()
     {
+        var keepCatalog = (catalog.SelectedItem as CatalogPackage)?.Id;
+        var packages = await db.CatalogPackages(); catalog.ItemsSource = packages; catalog.SelectedItem = packages.FirstOrDefault(p => p.Id == keepCatalog);
         companyList = await db.Companies();
         companies.ItemsSource = companyList;
         userCompany.ItemsSource = companyList;
@@ -99,10 +104,12 @@ public class AdminPage : AccountingPage
 
     private async Task AddCompany()
     {
-        await db.AddCompany(companyName.Text ?? "");
-        status.Text = $"Contabilidad \"{companyName.Text?.Trim()}\" creada. Ahora agréguele un usuario para poder trabajarla.";
+        if (catalog.SelectedItem is not CatalogPackage package) throw new InvalidOperationException("Seleccione el catálogo definitivo de la nueva contabilidad.");
+        var created = await db.CreateCompanyFromCatalog(companyName.Text ?? "", package.Id);
+        status.Text = $"Contabilidad \"{companyName.Text?.Trim()}\" creada. Catálogo asignado y bloqueado. Ahora agréguele un usuario para poder trabajarla.";
         companyName.Text = "";
         await Load();
+        userCompany.SelectedItem = companyList.FirstOrDefault(c => c.Id == created);
     }
 
     private async Task AddUser()
@@ -160,6 +167,8 @@ public class AdminPage : AccountingPage
         status.Text = "Respaldo creado: " + await db.Backup(folder);
     }
 
+    private Task ManageCatalogs() => Navigation.PushAsync(new CatalogPackagesPage(db));
+
     private Task Help() => DisplayAlertAsync("Empresas y Usuarios",
         "El usuario maestro solo administra: crea contabilidades y los usuarios que las trabajan, cambia contraseñas y borra usuarios. " +
         "Cada contabilidad se abre entrando con su propio usuario (Cerrar Sesión y entrar con ese usuario).", "Cerrar");
@@ -167,7 +176,7 @@ public class AdminPage : AccountingPage
     private void CloseApp()
     {
 #if WINDOWS || MACCATALYST
-        if (Window != null) Application.Current?.CloseWindow(Window);
+        _ = PendingEdits.CloseWindow(Window);
 #else
         Application.Current?.Quit();
 #endif
@@ -234,3 +243,5 @@ public class AdminPage : AccountingPage
 
     private static Border Box(Entry entry) => new() { Content = entry, Stroke = Colors.Gray, StrokeThickness = 1, Padding = 0, BackgroundColor = Colors.White };
 }
+
+

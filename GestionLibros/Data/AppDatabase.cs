@@ -1,4 +1,4 @@
-﻿using GestionLibros.Models;
+using GestionLibros.Models;
 using SQLite;
 using System.Security.Cryptography;
 namespace GestionLibros.Data;
@@ -17,12 +17,16 @@ public sealed partial class AppDatabase
   try {
    if (ready) return;
    await db.CreateTableAsync<Company>();
+   await db.CreateTableAsync<CatalogPackage>();
    await db.CreateTableAsync<LocalUser>();
    await db.CreateTableAsync<Account>();
    await db.CreateTableAsync<Journal>();
    await db.CreateTableAsync<JournalDraft>();
    await db.CreateTableAsync<JournalLine>();
    await db.CreateTableAsync<ImportedBalance>();
+   await db.CreateTableAsync<MigrationPolicy>();
+   await db.CreateTableAsync<ImportBatch>();
+   await db.CreateTableAsync<DetailedPeriod>();
    await db.CreateTableAsync<SessionToken>();
    await db.CreateTableAsync<PolicyType>();
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PolicyType_Code ON PolicyType (CompanyId, Code)");
@@ -105,6 +109,11 @@ public sealed partial class AppDatabase
   RequireCompany(companyId);
   return db.Table<Account>().Where(a => a.CompanyId == companyId).OrderBy(a => a.Code).ToListAsync();
  }
+ private static void RequireMutableCatalog(SQLite.SQLiteConnection c, int companyId)
+ {
+  if (c.Find<Company>(companyId)?.CatalogPackageId > 0)
+   throw new InvalidOperationException("El catálogo de esta contabilidad quedó fijado al crearla y no se puede modificar ni reemplazar.");
+ }
  public async Task AddAccount(int companyId, string code, string description, string parentCode)
  {
   RequireCompany(companyId);
@@ -118,6 +127,7 @@ public sealed partial class AppDatabase
   if (parent != null && await db.Table<JournalLine>().Where(l => l.AccountId == parent.Id).CountAsync() > 0) throw new InvalidOperationException("No puede agregar subcuentas a una cuenta con movimientos.");
   var level = parent == null ? 1 : parent.Level + 1;
   if (level > 9) throw new InvalidOperationException("El catálogo admite hasta 9 niveles en esta versión de prueba.");
-  await db.RunInTransactionAsync(c => { RequireCompany(companyId); c.Insert(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now }); });
+  await db.RunInTransactionAsync(c => { RequireCompany(companyId); RequireMutableCatalog(c, companyId); c.Insert(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now }); });
  }
 }
+

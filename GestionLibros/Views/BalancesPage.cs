@@ -8,10 +8,17 @@ namespace GestionLibros.Views;
 public class BalancesPage : AccountingPage
 {
     private readonly AppDatabase db;
+    private readonly AccountMovementsDialog movements;
     private readonly Company company;
     private readonly int year;
     private int month;
     private int activeTab;
+    private AppDatabase.ConsultationSource source;
+    private bool choosingSource;
+    private readonly Picker sourcePicker = new() { Title = "Origen", WidthRequest = 240, HeightRequest = 24, MinimumHeightRequest = 0, FontSize = 11, TextColor = Colors.Black, BackgroundColor = Colors.White, IsVisible = false };
+    private string SourceNote => source == AppDatabase.ConsultationSource.Reconciled ? "" : source == AppDatabase.ConsultationSource.ImportedOnly
+        ? "Solo GL2000 importado · Corte pendiente: no incluye partidas FREDI. Los acumulados sin detalle no tienen póliza individual."
+        : "Solo partidas FREDI · Corte pendiente: estos saldos no incluyen acumulados GL2000.";
     private string filter = "";
     private List<BalanceRow> balances = [];
     private List<BalanceDisplayRow> visibleRows = [];
@@ -31,6 +38,7 @@ public class BalancesPage : AccountingPage
     public BalancesPage(AppDatabase db, Company company, int year, int month) : base("Consulta de Cuentas")
     {
         this.db = db; this.company = company; this.year = year; this.month = month;
+        movements = new AccountMovementsDialog(this, db, company);
         NavigationPage.SetHasNavigationBar(this, false);
         UpdateTitle();
         Gl2000Chrome.ApplyMenus(this, Open);
@@ -39,6 +47,13 @@ public class BalancesPage : AccountingPage
         MenuBarItems.Clear();
 
         var tabRow = new HorizontalStackLayout { Spacing = 1, HeightRequest = 20 };
+        sourcePicker.ItemsSource = new[] { "GL2000 importado", "Partidas FREDI" };
+        sourcePicker.SelectedIndexChanged += async (_, _) =>
+        {
+            if (choosingSource || sourcePicker.SelectedIndex < 0) return;
+            source = sourcePicker.SelectedIndex == 0 ? AppDatabase.ConsultationSource.ImportedOnly : AppDatabase.ConsultationSource.LocalOnly;
+            await Guard(Load);
+        };
         foreach (var (name, index) in new[] { ("Cuenta", 0), ("Nombre", 1) })
         {
             var button = JournalsPage.FlatButton(name, () => { activeTab = index; Render(selected?.Row.Code); return Task.CompletedTask; });
@@ -76,9 +91,9 @@ public class BalancesPage : AccountingPage
                 if (i >= 2) label.HorizontalTextAlignment = TextAlignment.End;
                 row.Add(label, i, 0);
             }
-            var doubleClick = new TapGestureRecognizer { NumberOfTapsRequired = 2 };
-            doubleClick.Tapped += async (_, _) => { if (row.BindingContext is BalanceDisplayRow item) { Select(item); await Guard(OpenLedger); } };
-            row.GestureRecognizers.Add(doubleClick);
+            var click = new TapGestureRecognizer();
+            click.Tapped += async (_, _) => { if (row.BindingContext is BalanceDisplayRow item) { table.SelectedItem = item; Select(item); await Guard(OpenLedger); } };
+            row.GestureRecognizers.Add(click);
             return row;
         });
         table.SelectionChanged += (_, e) => Select(e.CurrentSelection.FirstOrDefault() as BalanceDisplayRow);
@@ -123,6 +138,7 @@ public class BalancesPage : AccountingPage
         var monthBox = new HorizontalStackLayout { Spacing = 5, VerticalOptions = LayoutOptions.Center };
         monthBox.Children.Add(ClassicWorkspaceChrome.Text("Mes :", true)); monthBox.Children.Add(monthPicker);
         left.Children.Add(monthBox);
+        left.Children.Add(sourcePicker);
         footer.Add(left, 0, 0);
         var right = new HorizontalStackLayout { Spacing = 5 };
         right.Children.Add(JournalsPage.ActionButton("Exportar", "gl_query.png", () => Guard(Export), 90));
@@ -134,8 +150,9 @@ public class BalancesPage : AccountingPage
         var body = new Grid { Padding = new Thickness(8, 6, 8, 0), RowSpacing = 0,
             RowDefinitions = { new RowDefinition(20), new RowDefinition(GridLength.Star), new RowDefinition(30) } };
         body.Add(tabRow, 0, 0); body.Add(panel, 0, 1); body.Add(footer, 0, 2);
-        Content = ClassicWorkspaceChrome.Frame(menu, ClassicWorkspaceChrome.ModuleToolbar(Open, year, month), body,
+        var frame = ClassicWorkspaceChrome.Frame(menu, ClassicWorkspaceChrome.ModuleToolbar(Open, year, month), body,
             ClassicWorkspaceChrome.Status(db, "Recorriendo Registros"));
+        Content = new Grid { Children = { frame, movements } };
         Loaded += (_, _) => UpdateTitle();
     }
 
@@ -157,13 +174,30 @@ public class BalancesPage : AccountingPage
     {
         base.OnAppearing();
         UpdateTitle();
-        await Guard(Load);
+        await Guard(async () => { await Load(); if (movements.IsVisible) await movements.Refresh(); });
+    }
+
+    protected override bool OnBackButtonPressed()
+    {
+        if (movements.IsVisible) { movements.Close(); return true; }
+        return base.OnBackButtonPressed();
     }
 
     private async Task Load()
     {
         var keep = selected?.Row.Code;
-        balances = await db.Balances(company.Id, year, month);
+        var pending = await db.ConsultationNeedsSource(company.Id);
+        choosingSource = true;
+        try
+        {
+            sourcePicker.IsVisible = pending;
+            if (!pending) source = AppDatabase.ConsultationSource.Reconciled;
+            else if (source == AppDatabase.ConsultationSource.Reconciled) source = AppDatabase.ConsultationSource.ImportedOnly;
+            sourcePicker.SelectedIndex = source == AppDatabase.ConsultationSource.LocalOnly ? 1 : 0;
+        }
+        finally { choosingSource = false; }
+        balances = []; Render(keep);
+        balances = await db.Balances(company.Id, year, month, source);
         Render(keep);
     }
 
@@ -183,7 +217,7 @@ public class BalancesPage : AccountingPage
         if (target != null) table.ScrollTo(target, position: ScrollToPosition.MakeVisible, animate: false);
         for (var i = 0; i < tabs.Count; i++) tabs[i].BackgroundColor = i == activeTab ? Gl2000Chrome.HeaderBlue : Color.FromArgb("#A5A7E5");
         count.Text = $"{visibleRows.Count} cuentas";
-        Notice.Text = filter.Length > 0 ? $"Filtro: {filter}" : "";
+        Notice.Text = SourceNote + (filter.Length > 0 ? $"  Filtro: {filter}" : "");
     }
 
     private void Select(BalanceDisplayRow? item) { selected?.SetSelected(false); selected = item; selected?.SetSelected(true); }
@@ -212,7 +246,11 @@ public class BalancesPage : AccountingPage
         if (text == null) return; filter = text.Trim(); Render(selected?.Row.Code);
     });
 
-    private ReportDocument Document() => ReportFormatter.Balances(company.Name, year, month, filter, Filtered());
+    private ReportDocument Document()
+    {
+        var doc = ReportFormatter.Balances(company.Name, year, month, filter, Filtered());
+        return source == AppDatabase.ConsultationSource.Reconciled ? doc : doc with { Title = doc.Title + " — Consulta por origen", Note = SourceNote + " " + doc.Note, Options = SourceNote + " " + doc.Options };
+    }
 
     private async Task Export()
     {
@@ -225,13 +263,13 @@ public class BalancesPage : AccountingPage
         if (selected == null) throw new InvalidOperationException("Seleccione una cuenta.");
         var code = selected.Row.Code;
         var account = (await db.Accounts(company.Id)).FirstOrDefault(a => a.Code == code) ?? throw new InvalidOperationException("La cuenta ya no está disponible.");
-        await Navigation.PushAsync(new LedgerPage(db, company, year, month, account.Id));
+        if (!movements.IsVisible) await movements.Show(account, year, month, source);
     }
 
     private Task Help() => DisplayAlertAsync("Consulta de Cuentas",
         "Muestra por cuenta el saldo al inicio del mes, los cargos y créditos del mes y el saldo actual. Las cuentas de detalle aparecen en azul; " +
         "las superiores suman a sus subcuentas. Los importes negativos (acreedores) aparecen en rojo entre paréntesis. " +
-        "El Localizador salta a la cuenta por número o nombre según la pestaña. Mes cambia el periodo consultado. Doble clic abre el mayor de la cuenta.", "Cerrar");
+        "El Localizador salta a la cuenta por número o nombre según la pestaña. Mes cambia el periodo consultado. Un clic abre el desglose de movimientos. Pulse una referencia o importe para consultar su partida completa.", "Cerrar");
 
     private Task Open(string key) => Guard(async () =>
     {
@@ -268,3 +306,4 @@ public class BalancesPage : AccountingPage
         }
     }
 }
+

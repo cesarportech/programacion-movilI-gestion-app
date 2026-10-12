@@ -1,4 +1,4 @@
-using GestionLibros.Models;
+﻿using GestionLibros.Models;
 
 namespace GestionLibros.Data;
 
@@ -43,24 +43,38 @@ public sealed partial class AppDatabase
                 if (available.Count > 0)
                 {
                     var latest = available.Max(b => b.Year);
-                    imported.AddRange(available.Where(b => b.Year == latest));
+                    var current = available.Where(b => b.Year == latest).ToList();
+                    if (!current.Any(b => b.RollupOnly)) { imported.AddRange(current); return; }
+                    // A zero parent marker selects this snapshot but delegates its values to children.
+                    if (includeChildren) foreach (var child in children[account.Code]) Collect(child);
                     return; // A parent's own GL totals take precedence over descendants' GL totals.
                 }
                 if (includeChildren) foreach (var child in children[account.Code]) Collect(child);
             }
             Collect(selected);
+            bool Covers(int ancestor, int accountId)
+            {
+                var account = accounts[accountId];
+                while (true) { if (account.Id == ancestor) return true; if (account.ParentCode.Length == 0) return false;
+                    account = snapshot.Accounts.Single(a => a.Code == account.ParentCode); }
+            }
+            var replaced = snapshot.Detailed.Select(p => (p.Year, p.Month)).ToHashSet();
             var movements = new List<LedgerRow>();
             long opening = 0;
             foreach (var id in ids)
                 foreach (var line in lines[id])
                 {
+                    // Later annual openings already contain earlier historical detail.
+                    if (!string.IsNullOrEmpty(line.ImportBatchId) && imported.Any(b => b.Month == 0 && b.Year > line.Date.Year && Covers(b.AccountId, id))) continue;
                     if (line.Date < from) opening = checked(opening + line.DebitCents - line.CreditCents);
                     else if (line.Date <= through)
                         movements.Add(new(line.JournalId, line.LineId, line.Date, line.Type, line.Reference,
-                            accounts[id].Code, line.Concept, line.DebitCents, line.CreditCents, 0));
+                            accounts[id].Code, line.Concept, line.DebitCents, line.CreditCents, 0, false,
+                            string.IsNullOrEmpty(line.ImportBatchId) ? $"FREDI · póliza {line.JournalId}" : $"GL2000 detalle · lote {line.ImportBatchId} · origen {line.SourceId}"));
                 }
             foreach (var balance in imported)
             {
+                if (balance.Month > 0 && replaced.Contains((balance.Year, balance.Month)) && (includeChildren || !children[selected.Code].Any())) continue;
                 if (balance.Year < from.Year || balance.Month == 0)
                 {
                     opening = checked(opening + balance.DebitCents - balance.CreditCents);
@@ -78,7 +92,7 @@ public sealed partial class AppDatabase
                     // The date is an ordering key, not a transaction date: views/exports show MM/yyyy.
                     movements.Add(new(0, 0, monthEnd, "GL", "", accounts[balance.AccountId].Code,
                         $"Acumulado de {MonthNames[balance.Month - 1]} {balance.Year} (GL2000; sin detalle diario)",
-                        balance.DebitCents, balance.CreditCents, 0, true));
+                        balance.DebitCents, balance.CreditCents, 0, true, $"GL2000 acumulado · lote {balance.ImportBatchId}"));
                 }
             }
             long running = opening;
@@ -87,7 +101,8 @@ public sealed partial class AppDatabase
                 .ThenBy(m => m.JournalId).ThenBy(m => m.LineId).ThenBy(m => m.AccountCode, StringComparer.Ordinal)
                 .Select(m => { running = checked(running + m.Debits - m.Credits); return m with { Balance = running }; }).ToList();
             return new(snapshot.CompanyName, selected.Code, selected.Description, from, through, includeChildren,
-                opening, ordered, imported.Count > 0);
+                opening, ordered, imported.Count > 0,
+                "Procedencia GL2000 (incluye apertura y períodos anteriores): " + string.Join(", ", imported.Select(b => b.ImportBatchId).Concat(snapshot.Lines.Where(l => ids.Contains(l.AccountId) && !string.IsNullOrEmpty(l.ImportBatchId)).Select(l => l.ImportBatchId)).Distinct()) + ". Pólizas FREDI identificadas por su número interno. Consulte Corte y lotes de migración para el archivo y ejercicio de cada lote.");
         }
     }
 }

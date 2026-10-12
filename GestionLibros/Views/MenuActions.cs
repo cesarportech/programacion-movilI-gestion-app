@@ -1,4 +1,4 @@
-
+﻿
 using System.Text;
 using GestionLibros.Data;
 using GestionLibros.Data.Import;
@@ -37,6 +37,7 @@ internal static class MenuActions
     {
         switch (key)
         {
+            case "migration": await MigrationActions.Run(page, db, company); return true;
             case "import-catalog": await CatalogImport.Run(page, db, company, year, month); return true;
             case "logout": await SessionActions.SignOut(page, db); return true;
             case "accumulate": await Accumulate(page); return true;

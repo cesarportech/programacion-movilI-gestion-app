@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Data.Import;
 
 record BalanceRowView(long Opening, long Debits, long Credits, long Closing);
@@ -61,6 +61,7 @@ static class ImportChecks
             new("3", "", 0, "Sin totales propios", null, "", "", Gl(0)),
             new("3.1", "3", 1, "Hija", null, "", "", Gl(70)),
         ];
+        await db.SetMigrationCutoff(sums, new DateTime(2026, 12, 31));
         var imported = await db.ImportAccounts(sums, withBalances, 2026);
         Check(imported.BalanceAccounts == 4, "Only accounts with non-zero GL amounts carry imported rows");
         async Task<BalanceRowView> At(int year, int month, string code)
@@ -90,6 +91,7 @@ static class ImportChecks
             Check(rows.All(r => r.ParentCode.Length == 0 || rows.Any(p => p.Code == r.ParentCode)), "Real GL2000 catalog has every parent");
             // The Consulta for September must show exactly the GL's own totals for the root account.
             var copy = await TestSupport.NewCompany(db, "Test-only-secret-123", "Copia GL 003");
+            await db.SetMigrationCutoff(copy, new DateTime(GlCatalog.YearOf(real)!.Value, 12, 31));
             await db.ImportAccounts(copy, rows, GlCatalog.YearOf(real));
             var root = rows.First(r => r.ParentCode.Length == 0).Balances!;
             var glOpening = root.Opening + root.Debits.Take(8).Sum() - root.Credits.Take(8).Sum();

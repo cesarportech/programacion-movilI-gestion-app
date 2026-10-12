@@ -155,7 +155,7 @@ public class LoginPage : ContentPage
         if (busy) return;
         password.Text = confirm.Text = "";
 #if WINDOWS || MACCATALYST
-        if (Window != null) Application.Current?.CloseWindow(Window);
+        _ = PendingEdits.CloseWindow(Window);
 #else
         username.Text = "";
         message.IsVisible = false;

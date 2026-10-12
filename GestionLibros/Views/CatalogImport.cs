@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Data.Import;
 using GestionLibros.Models;
 
@@ -43,15 +43,16 @@ internal static class CatalogImport
         { throw new InvalidOperationException("No se pudo leer el catálogo: " + ex.Message); }
 
         var fiscalYear = GlCatalog.YearOf(path);
+        if (fiscalYear != null && await db.MigrationCutoff(company.Id) == null) throw new InvalidOperationException("Defina primero el corte en Utilerías → Corte y lotes de migración.");
         var balances = fiscalYear == null
             ? "Este archivo no tiene ejercicio (plantilla): solo se copian las cuentas."
-            : $"También se copian los acumulados de {fiscalYear} (saldo inicial y cargos/créditos de cada mes) y reemplazan los importados antes para ese año.";
+            : $"También se copian los acumulados de {fiscalYear} (saldo inicial y cargos/créditos de cada mes) respetando el corte configurado. Los lotes repetidos no se duplican; no se reemplaza un ejercicio ya conciliado con detalle por un archivo diferente.";
         if (!await page.DisplayAlertAsync("Importar catálogo",
             $"Se copiarán {accounts.Count} cuentas de {label} a \"{company.Name}\".\n\n" +
             $"Las cuentas que ya existen en FREDI no se modifican. {balances} " +
             "Los archivos del GL2000 solo se leen.", "Importar", "Cancelar")) return;
 
-        var result = await db.ImportAccounts(company.Id, accounts, fiscalYear);
+        var result = await db.ImportAccounts(company.Id, accounts, fiscalYear, path);
         await page.DisplayAlertAsync("Catálogo importado",
             $"Cuentas agregadas: {result.Added}\nYa existían (sin cambios): {result.Skipped}" +
             (fiscalYear == null ? "" : $"\nCuentas con acumulados de {fiscalYear}: {result.BalanceAccounts}"), "Aceptar");

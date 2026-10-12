@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 using System.Text.Json;
 static class DraftChecks
@@ -53,6 +53,11 @@ static class DraftChecks
   await Denied(() => Task.Run(() => reopened.StoreJournalDraft("private", company, new(header, rows, null))), "Revoked session cannot write drafts");
   await reopened.Login(TestSupport.UserFor(company), "Updated-drafts-123");
   Check(reopened.JournalDrafts(company, 0).Count == 1, "Security lock preserves existing drafts for authorized recovery");
+  var revision = reopened.JournalDrafts(company, 0).Single().Revision;
+  reopened.StoreJournalDraft("private", company, new(header, rows, null), revision);
+  await Denied(() => Task.Run(() => reopened.StoreJournalDraft("private", company, new(header, rows, raw), revision)), "Stale editor cannot overwrite a newer draft");
+  await Denied(() => Task.Run(() => reopened.DeleteJournalDraft("private", company, revision)), "Stale editor cannot discard a newer draft");
+  Check(reopened.JournalDrafts(company, 0).Single().Revision == revision + 1, "Conflicting operations preserve newer draft");
   Console.WriteLine($"All {count} draft checks passed.");
  }
 }

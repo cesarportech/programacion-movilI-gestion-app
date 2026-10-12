@@ -5,13 +5,15 @@ public partial class JournalEditor
 {
  private string draftId = Guid.NewGuid().ToString("N");
  private string baseline = "";
+ private long draftRevision;
+ private bool saving;
  private bool restoring, deciding;
  private int editingIndex = -1;
  private JournalDraftContent Capture() => new(new Journal { Id = original.Id, ChangedAt = original.ChangedAt,
   Type = type.Text ?? "", Reference = reference.Text ?? "", Date = date.Date ?? DateTime.MinValue, Concept = concept.Text ?? "" },
   lines.ToList(), movementDialog.HasChanges ? movementDialog.Capture(editingIndex) : null);
  private string Fingerprint() => JsonSerializer.Serialize(Capture());
- public bool HasPendingChanges => loaded && Fingerprint() != baseline;
+ public bool HasPendingChanges => !viewOnly && loaded && Fingerprint() != baseline;
  private void TrackChanges()
  {
   foreach (var field in new[] { type, reference, concept }) field.TextChanged += (_, _) => PersistDraft();
@@ -20,11 +22,11 @@ public partial class JournalEditor
  }
  private void PersistDraft()
  {
-  if (!loaded || restoring) return;
+  if (viewOnly || !loaded || restoring) return;
   try
   {
-   if (HasPendingChanges) db.StoreJournalDraft(draftId, company.Id, Capture());
-   else db.DeleteJournalDraft(draftId, company.Id);
+   if (HasPendingChanges) draftRevision = db.StoreJournalDraft(draftId, company.Id, Capture(), draftRevision);
+   else { db.DeleteJournalDraft(draftId, company.Id, draftRevision); draftRevision = 0; }
   }
   catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo guardar el borrador de recuperación. Mantenga la ventana abierta."; }
  }
@@ -41,7 +43,7 @@ public partial class JournalEditor
   restoring = true;
   try
   {
-   draftId = draft.Id;
+   draftId = draft.Id; draftRevision = draft.Revision;
    original.ChangedAt = content.Header.ChangedAt;
    type.Text = content.Header.Type; reference.Text = content.Header.Reference; concept.Text = content.Header.Concept;
    date.Date = content.Header.Date == DateTime.MinValue ? null : content.Header.Date;
@@ -58,18 +60,26 @@ public partial class JournalEditor
  }
  private async Task<bool> SavePending()
  {
+  if (viewOnly || saving) return false;
+  saving = true;
+  try
+  {
   if (!await movementDialog.CommitPending()) return false;
   if (date.Date == null) throw new InvalidOperationException("Indique una fecha.");
-  db.StoreJournalDraft(draftId, company.Id, Capture());
+  draftRevision = db.StoreJournalDraft(draftId, company.Id, Capture(), draftRevision);
   var header = Capture().Header;
-  await db.SaveJournal(company.Id, header, lines, draftId);
+  IsEnabled = false;
+  await db.SaveJournal(company.Id, header, lines, draftId, draftRevision);
+  draftRevision = 0;
   original.Id = header.Id; original.ChangedAt = header.ChangedAt;
   baseline = Fingerprint();
   return true;
+  }
+  finally { saving = false; IsEnabled = true; }
  }
  public async Task<bool> ConfirmLeave(Page prompt)
  {
-  if (deciding) return false;
+  if (deciding || saving) return false;
   if (!HasPendingChanges) return true;
   deciding = true;
   try
@@ -77,11 +87,13 @@ public partial class JournalEditor
    var choice = await prompt.DisplayActionSheetAsync("Póliza con cambios sin guardar", "Continuar editando", "Descartar", "Guardar");
    if (choice == "Guardar") return await SavePending();
    if (choice != "Descartar") return false;
-   db.DeleteJournalDraft(draftId, company.Id);
+   db.DeleteJournalDraft(draftId, company.Id, draftRevision);
+   draftRevision = 0;
    restoring = true;
    try
    {
     var previous = JsonSerializer.Deserialize<JournalDraftContent>(baseline)!;
+    original.ChangedAt = previous.Header.ChangedAt;
     movementDialog.Abandon();
     type.Text = previous.Header.Type; reference.Text = previous.Header.Reference; concept.Text = previous.Header.Concept;
     date.Date = previous.Header.Date == DateTime.MinValue ? null : previous.Header.Date;
@@ -100,6 +112,11 @@ public partial class JournalEditor
 
 internal static class PendingEdits
 {
+ internal static async Task CloseWindow(Window? window)
+ {
+  if (window == null || !await Confirm(window)) return;
+  Application.Current?.CloseWindow(window);
+ }
  internal static async Task<bool> Confirm(Window? window)
  {
   if (window?.Page == null) return true;

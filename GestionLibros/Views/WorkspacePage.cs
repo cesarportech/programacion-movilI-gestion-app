@@ -1,4 +1,4 @@
-using GestionLibros.Data;
+﻿using GestionLibros.Data;
 using GestionLibros.Models;
 
 namespace GestionLibros.Views;
@@ -96,7 +96,7 @@ public class WorkspacePage : AccountingPage
     private void CloseApp()
     {
 #if WINDOWS || MACCATALYST
-        if (Window != null) Application.Current?.CloseWindow(Window);
+        _ = PendingEdits.CloseWindow(Window);
 #else
         Application.Current?.Quit();
 #endif

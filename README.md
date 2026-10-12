@@ -1,4 +1,4 @@
-﻿# FREDI Contabilidad
+# FREDI Contabilidad
 
 Aplicación .NET MAUI 10 con SQLite local. El proyecto técnico conserva el nombre GestionLibros; el ejemplo de libros fue reemplazado. Se conserva la base fredi-pruebas-v1.db3 y las tablas existentes; las tablas Journal y JournalLine se agregan automáticamente sin borrar usuarios, contabilidades ni cuentas.
 
@@ -30,7 +30,7 @@ Las tablas amarillas, encabezados azules, formularios verdes, nombres y organiza
 - Saldo inicial calculado con movimientos previos al mes; cierre = inicial + cargos - créditos. Deudor positivo, acreedor negativo. Las cuentas superiores suman descendientes.
 - Catálogo compartido entre ejercicios dentro de cada contabilidad. La conservación histórica por ejercicio está pendiente de definir antes de migrar.
 - Límite provisional de 9 niveles. Las reglas son explícitas para pruebas; no se ha certificado equivalencia con el sistema antiguo.
-- Cancelar una póliza descarta el borrador; no modifica la base. Quitar movimientos solo se persiste al aceptar la póliza.
+- Al cancelar o salir con cambios se solicita Guardar, Descartar o Continuar editando. Guardar valida y acepta la póliza; si no cuadra, permanece abierta. Quitar movimientos solo afecta saldos al aceptar.
 
 ## Alcance local
 
@@ -40,7 +40,7 @@ Sesión recordada: al iniciar sesión se crea un token aleatorio de 256 bits. El
 
 Cada operación protegida verifica el usuario almacenado, su versión de seguridad y los plazos de sesión; las escrituras transaccionales vuelven a verificar antes de guardar. Cambiar contraseña (también mediante la herramienta de recuperación), suspender o eliminar al usuario invalida sus sesiones abiertas. Suspender / Activar está disponible para el maestro en Usuarios; reactivar exige un login nuevo.
 
-La ventana revisa la vigencia cada 5 segundos y al recuperar el foco, sin renovar la actividad. Ante revocación o vencimiento se limpia el token y se vuelve al login; los cambios sin guardar se descartan. En Windows, las pulsaciones de teclado y clics renuevan la actividad, además de las operaciones protegidas. En otras plataformas, la actividad se registra al operar; la captura de entrada nativa se implementó para Windows. Leer sin interactuar durante 15 minutos también bloquea la sesión. Los controles de acceso operan sobre la misma base local compartida por las instancias: copias independientes no comparten revocaciones.
+La ventana revisa la vigencia cada 5 segundos y al recuperar el foco, sin renovar la actividad. Ante revocación o vencimiento se limpia el token y se vuelve al login; los cambios pendientes quedan en el último borrador guardado para recuperación autorizada. En Windows, las pulsaciones de teclado y clics renuevan la actividad, además de las operaciones protegidas. En otras plataformas, la actividad se registra al operar; la captura de entrada nativa se implementó para Windows. Leer sin interactuar durante 15 minutos también bloquea la sesión. Los controles de acceso operan sobre la misma base local compartida por las instancias: copias independientes no comparten revocaciones.
 
 Contraseñas con PBKDF2 SHA-256 y sal aleatoria. No hay contraseñas predeterminadas. C:/Sistemas nunca se modifica.
 
@@ -99,3 +99,35 @@ Pendiente: importar las pólizas del GL2000 (POL/ASI), módulo de bancos y chequ
 ## Comprobación de esta etapa
 
 69 comprobaciones automáticas aprobadas (37 anteriores + 32 de reportes). Compilación Windows: 0 errores y 0 advertencias. Se revisaron visualmente las muestras HTML de balanza y mayor y se comprobó una muestra PDF de 7 páginas con encabezados repetidos. No se ha enviado ningún trabajo a una impresora. La navegación nativa completa permanece pendiente de revisión con el usuario por las limitaciones de captura del escritorio.
+
+
+## Protección de captura y recuperación
+
+La cabecera, los movimientos y el texto incompleto de la ventana de movimiento se conservan en JournalDraft al editar. Esta tabla no participa en saldos ni reportes. Cada borrador pertenece a un usuario y contabilidad; se ofrece recuperarlo al entrar nuevamente en Agregar o Cambiar la misma póliza. Abrir sin recuperar conserva los borradores existentes.
+
+Cancelar, Salir, volver atrás, cerrar sesión y cerrar la ventana de Windows solicitan Guardar, Descartar o Continuar editando cuando hay cambios pendientes. También se protege Cancelar y la X del movimiento. Guardar en el movimiento lo incorpora a la póliza todavía sin publicar; Guardar en la salida del editor valida y publica la póliza completa. Si falla la validación, la salida se cancela.
+
+Aceptar una póliza elimina su borrador en la misma transacción. Un borrador de edición no puede sobrescribir una póliza que cambió posteriormente. Descartar elimina solo el borrador seleccionado. Ante revocación o vencimiento de sesión se conserva el último borrador persistido sin permitir publicar con acceso retirado. La recuperación frente a un cierre inesperado alcanza los cambios guardados correctamente en disco; un fallo de almacenamiento puede impedirla y se muestra un aviso.
+
+Inicio normal: `Iniciar-Fredi.ps1` abre el ejecutable ya compilado. Si FREDI está abierto, lo informa y no termina ningún proceso. Compilación: `Compilar-Fredi.ps1` se ejecuta con la aplicación cerrada; si está abierta, se detiene con instrucciones para guardar y cerrar. Nunca fuerza el cierre.
+
+
+## Corte de migración y lotes
+
+Antes de importar más saldos, configure **Utilerías → Corte y lotes de migración**. GL2000 cubre hasta el fin de mes elegido y FREDI comienza al día siguiente. Las pólizas locales solapadas impiden fijar el corte; los acumulados antiguos sin corte requieren revisión antes de calcular saldos. No se asigna ninguna fecha automáticamente.
+
+Los lotes repetidos no duplican importes. El detalle mensual normalizado solo sustituye acumulados cuando coinciden exactamente los cargos y créditos, manteniendo evidencia y procedencia. Instrucciones, límites y formato JSON: [MIGRACION.md](MIGRACION.md).
+
+### Desglose desde Consulta
+Un clic en una cuenta abre Desglose de Movimientos para el mes seleccionado. Pulse una referencia, cargo o crédito, o use Ver partida, para consultar la póliza completa con el movimiento resaltado. Volver conserva el desglose. La partida se abre en modo de consulta y no crea borradores ni modifica saldos. Las filas de acumulados GL2000 sin detalle se identifican y explican por qué no tienen una partida individual disponible.
+
+
+Consulta con migración pendiente: muestra las cuentas por origen (GL2000 importado o Partidas FREDI), sin sumar ambas fuentes. El origen se conserva en el desglose y se identifica en las exportaciones. Los reportes consolidados y las escrituras conservan la validación del corte. Para navegar al detalle antiguo se necesitan pólizas históricas importadas y conciliadas; los acumulados mensuales no contienen referencias individuales.
+
+
+Catálogos precargados: el maestro dispone de Archivos → Catálogos precargados. Los paquetes solo incluyen código, cuenta superior y descripción; son versiones inmutables. Una contabilidad vinculada mediante CatalogPackageId rechaza altas, cambios, bajas e importaciones de cuentas. El maestro selecciona obligatoriamente el catálogo al crear la contabilidad y después le asigna el usuario. El usuario no elige ni cambia contabilidad o catálogo. La creación copia las cuentas sin saldos y fija el paquete de forma atómica.
+
+
+
+En Maestro → Catálogos puede agregar archivos GL2000 como paquetes internos sin saldos, revisar sus cuentas y eliminar paquetes que no estén asignados. La comprobación de asignación se repite dentro de la transacción para impedir borrar un catálogo usado por una contabilidad. Al regresar a Administración se actualiza el selector de catálogos.
+

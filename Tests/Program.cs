@@ -96,3 +96,6 @@ await ReportingChecks.Run();
 await LedgerImportChecks.Run();
 await SessionRevocationChecks.Run();
 await DraftChecks.Run();
+await MigrationChecks.Run();
+await DrilldownChecks.Run();
+await CatalogPackageChecks.Run();

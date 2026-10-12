@@ -4,9 +4,19 @@ namespace GestionLibros.Data;
 
 public sealed partial class AppDatabase
 {
+    public enum ConsultationSource { Reconciled, ImportedOnly, LocalOnly }
+
+    public async Task<bool> ConsultationNeedsSource(int companyId)
+    {
+        RequireCompany(companyId);
+        return await db.FindAsync<MigrationPolicy>(companyId) == null &&
+            await db.Table<ImportedBalance>().Where(b => b.CompanyId == companyId).CountAsync() > 0;
+    }
     // SQLite maps the joined columns into this read model; it is not a stored table.
     public sealed class PostedLine
     {
+        public string ImportBatchId { get; set; } = "";
+        public string SourceId { get; set; } = "";
         public int JournalId { get; set; }
         public int LineId { get; set; }
         public int AccountId { get; set; }
@@ -18,29 +28,35 @@ public sealed partial class AppDatabase
         public long CreditCents { get; set; }
     }
 
-    private record ReportSnapshot(string CompanyName, List<Account> Accounts, List<PostedLine> Lines, List<ImportedBalance> Imported);
+    private record ReportSnapshot(string CompanyName, List<Account> Accounts, List<PostedLine> Lines, List<ImportedBalance> Imported, List<DetailedPeriod> Detailed);
 
-    private async Task<ReportSnapshot> ReadReportSnapshot(int companyId, DateTime before)
+    private async Task<ReportSnapshot> ReadReportSnapshot(int companyId, DateTime before, ConsultationSource source = ConsultationSource.Reconciled)
     {
         RequireCompany(companyId);
         ReportSnapshot? snapshot = null;
         // One transaction keeps the account tree, headers and movements consistent.
         await db.RunInTransactionAsync(connection =>
         {
-            RequireSession();
+            RequireCompany(companyId);
+            if (!Enum.IsDefined(source)) throw new InvalidOperationException("Origen de consulta inválido.");
+            if (source == ConsultationSource.Reconciled) ValidateMigrationState(connection, companyId);
             var company = connection.Find<Company>(companyId)
                 ?? throw new InvalidOperationException("Contabilidad no disponible.");
             var accounts = connection.Table<Account>().Where(a => a.CompanyId == companyId)
                 .OrderBy(a => a.Code).ToList();
             var lines = connection.Query<PostedLine>(
-                "SELECT j.Id AS JournalId, l.Id AS LineId, l.AccountId, j.Date, j.Type, j.Reference, " +
+                "SELECT j.ImportBatchId, j.SourceId, j.Id AS JournalId, l.Id AS LineId, l.AccountId, j.Date, j.Type, j.Reference, " +
                 "CASE WHEN l.Concept = '' THEN j.Concept ELSE l.Concept END AS Concept, " +
                 "l.DebitCents, l.CreditCents FROM JournalLine l INNER JOIN Journal j ON j.Id = l.JournalId " +
                 "INNER JOIN Account a ON a.Id = l.AccountId " +
                 "WHERE j.CompanyId = ? AND a.CompanyId = ? AND j.Date < ?",
                 companyId, companyId, before);
             var imported = connection.Table<ImportedBalance>().Where(b => b.CompanyId == companyId).ToList();
-            snapshot = new(company.Name, accounts, lines, imported);
+            var detailed = connection.Table<DetailedPeriod>().Where(p => p.CompanyId == companyId).ToList();
+            // Unreconciled sources are independently readable, never silently added together.
+            if (source == ConsultationSource.ImportedOnly) lines = lines.Where(l => !string.IsNullOrEmpty(l.ImportBatchId)).ToList();
+            if (source == ConsultationSource.LocalOnly) { lines = lines.Where(l => string.IsNullOrEmpty(l.ImportBatchId)).ToList(); imported = []; detailed = []; }
+            snapshot = new(company.Name, accounts, lines, imported, detailed);
         });
         return snapshot!;
     }
@@ -133,22 +149,22 @@ public sealed partial class AppDatabase
                 (throughCode.Length > 0 && string.CompareOrdinal(account.Code, throughCode) > 0)) continue;
             var report = calculator.Calculate(account, start, end.AddDays(-1), true);
             var movements = report.Rows.Select(r => new LedgerMovement(r.Date, r.Type, r.Reference,
-                r.Concept, r.Debits, r.Credits, r.IsImported)).ToList();
+                r.Concept, r.Debits, r.Credits, r.IsImported, r.Origin)).ToList();
             if (report.Opening != 0 || movements.Count > 0)
-                result.Add(new(account.Code, account.Description, report.Opening, movements, report.HasImportedBalances));
+                result.Add(new(account.Code, account.Description, report.Opening, movements, report.HasImportedBalances, report.OriginNote));
         }
         return new(snapshot.CompanyName, year, fromMonth, throughMonth, fromCode, throughCode, result);
     }
 
     public async Task<LedgerReport> Ledger(int companyId, int accountId, DateTime from,
-        DateTime through, bool includeChildren = true)
+        DateTime through, bool includeChildren = true, ConsultationSource source = ConsultationSource.Reconciled)
     {
         RequireCompany(companyId);
         from = from.Date;
         through = through.Date;
         if (from.Year < 1900 || through.Year > 2100 || from > through)
             throw new InvalidOperationException("Indique un rango de fechas válido entre 1900 y 2100.");
-        var snapshot = await ReadReportSnapshot(companyId, through.AddDays(1));
+        var snapshot = await ReadReportSnapshot(companyId, through.AddDays(1), source);
         var selected = snapshot.Accounts.FirstOrDefault(a => a.Id == accountId)
             ?? throw new InvalidOperationException("La cuenta no pertenece a esta contabilidad.");
         return new LedgerCalculator(snapshot).Calculate(selected, from, through, includeChildren);
