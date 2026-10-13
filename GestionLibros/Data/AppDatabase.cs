@@ -119,7 +119,7 @@ public sealed partial class AppDatabase
   RequireCompany(companyId);
   if (await db.FindAsync<Company>(companyId) == null) throw new InvalidOperationException("La contabilidad no existe.");
   code = code.Trim(); description = description.Trim(); parentCode = parentCode.Trim();
-  if (code.Length == 0 || code.Length > 40 || description.Length == 0 || description.Length > 200) throw new InvalidOperationException("Indique código (máximo 40) y descripción (máximo 200).");
+  if (code.Length == 0 || code.Length > Account.CodeMaxLength || parentCode.Length > Account.CodeMaxLength || description.Length == 0 || description.Length > 200) throw new InvalidOperationException("La cuenta y cuenta superior admiten hasta 7 caracteres, incluido el punto (ejemplo: 1.12101). Indique una descripción de hasta 200 caracteres.");
   var accounts = await Accounts(companyId);
   if (accounts.Any(a => a.Code == code)) throw new InvalidOperationException("El código ya existe en esta contabilidad.");
   var parent = accounts.FirstOrDefault(a => a.Code == parentCode);
@@ -130,4 +130,5 @@ public sealed partial class AppDatabase
   await db.RunInTransactionAsync(c => { RequireCompany(companyId); RequireMutableCatalog(c, companyId); c.Insert(new Account { CompanyId = companyId, Code = code, Description = description, ParentCode = parentCode, Level = level, ChangedBy = RequireSession().Username, ChangedAt = DateTime.Now }); });
  }
 }
+
 

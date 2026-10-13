@@ -1,11 +1,11 @@
-﻿using GestionLibros.Data;
+using GestionLibros.Data;
 using GestionLibros.Models;
 namespace GestionLibros.Views;
 public partial class JournalEditor : AccountingPage
 {
  private readonly AppDatabase db; private readonly Company company; private readonly Journal original;
  private readonly Entry type = new() { Placeholder = "Tipo de póliza", MaxLength = 20 };
- private readonly Entry reference = new() { Placeholder = "Referencia", MaxLength = 60 };
+ private readonly Entry reference = new() { Placeholder = "Referencia", MaxLength = 7 };
  private readonly DatePicker date = new(); private readonly Entry concept = new() { Placeholder = "Concepto", MaxLength = 300 };
  private readonly VerticalStackLayout rows = new() { Spacing = 1, MinimumWidthRequest = 850 };
  private readonly Label sums = AccountingUi.Label("Sumas iguales", true); private readonly Label selection = AccountingUi.Label("Seleccione un movimiento.");
@@ -19,7 +19,7 @@ public partial class JournalEditor : AccountingPage
   movementDialog = new MovementDialog(this);
   type.Text = journal.Type; reference.Text = journal.Reference; date.Date = journal.Date; concept.Text = journal.Concept;
   BuildClassicEditor();
-  if (!viewOnly) TrackChanges();
+  if (!viewOnly) { TrackChanges(); ConfigureCaptureShortcuts(); }
   else { type.IsReadOnly = reference.IsReadOnly = concept.IsReadOnly = true; date.IsEnabled = false; }
  }
  protected override async void OnAppearing()
@@ -32,6 +32,7 @@ public partial class JournalEditor : AccountingPage
    {
     accounts = await db.Accounts(company.Id); policyTypes = await db.PolicyTypes(company.Id); ShowTypeName();
     if (original.Id != 0) lines.AddRange(await db.Lines(company.Id, original.Id));
+    if (!viewOnly && original.Id == 0) await InitializeReference();
     loaded = true; baseline = Fingerprint();
     if (!viewOnly) await RecoverDraft();
     selected = lines.FirstOrDefault(l => l.Id == selectedLineId);
@@ -77,3 +78,4 @@ public partial class JournalEditor : AccountingPage
   PersistDraft();
  }
 }
+

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using GestionLibros.Data;
 using GestionLibros.Models;
 
@@ -10,20 +10,23 @@ internal sealed class MovementDialog : ClassicDialog
 {
     // Impuesto sobre ventas used by the IVA buttons (Honduras ISV 15 %).
     private const decimal TaxRate = 0.15m;
-    private readonly Entry account = new() { MaxLength = 40 };
+    private readonly Entry account = new() { MaxLength = Account.CodeMaxLength };
     private readonly Label accountName = ClassicWorkspaceChrome.Text("");
     private readonly Entry concept = new() { MaxLength = 300 };
     private readonly Entry value = new() { MaxLength = 40, HorizontalTextAlignment = TextAlignment.End };
+    private bool postingShortcut;
     private readonly Label side = ClassicWorkspaceChrome.Text("", true);
     private List<Account> detail = [];
     private Action<JournalLine>? accept;
     private string baseline = "";
+    private MovementDraft? previousAccepted;
+    public Func<Task<MovementDraft?>>? RepeatSaved { get; set; }
     public event Action? Changed;
     private string Fingerprint => System.Text.Json.JsonSerializer.Serialize(new[] { account.Text, concept.Text, value.Text });
     public bool HasChanges => IsVisible && Fingerprint != baseline;
     internal void Abandon() => Close();
     public MovementDraft Capture(int index) => new(account.Text ?? "", concept.Text ?? "", value.Text ?? "", index);
-    public void Restore(MovementDraft draft) { account.Text = draft.Account; concept.Text = draft.Concept; value.Text = draft.Value; baseline = ""; }
+    public void Restore(MovementDraft draft) { postingShortcut = true; try { account.Text = draft.Account; concept.Text = draft.Concept; value.Text = draft.Value; baseline = ""; } finally { postingShortcut = false; } }
     public async Task<bool> CommitPending()
     {
         if (!HasChanges) return true;
@@ -43,9 +46,22 @@ internal sealed class MovementDialog : ClassicDialog
 
     public MovementDialog(Page page) : base(page, 440, 124, "Movimiento",
         "Cuenta: cuenta de detalle (la lupa busca por número o nombre). Valor: positivo es cargo, negativo es crédito. " +
-        "Puede escribir operaciones (por ejemplo 1500+250*2) y pulsar la calculadora o Enter. " +
+        "Enter avanza al siguiente campo. Al terminar el valor, + agrega un cargo y - un crédito sin otro Enter. F12 repite el último valor usado en el campo. " +
+        "Para operaciones, escríbalas entre paréntesis, por ejemplo (1500+250*2), y pulse la calculadora o Enter. " +
         $"IVA+ agrega el {TaxRate:P0} al valor, IVA- lo quita de un valor que ya lo incluye, e IVA deja solo el impuesto del valor.")
     {
+        foreach (var field in new[] { account, concept, value }) CaptureShortcut.F12(field, async () =>
+        {
+            try
+            {
+                var saved = RepeatSaved == null ? null : await RepeatSaved();
+                var previous = previousAccepted ?? saved;
+                if (previous == null) { Error.Text = "No hay un movimiento anterior para repetir."; return; }
+                field.Text = field == account ? previous.Account : field == concept ? previous.Concept : previous.Value;
+            }
+            catch (InvalidOperationException ex) { Error.Text = ex.Message; }
+            catch { Error.Text = "No se pudo recuperar la captura anterior."; }
+        });
         FieldLabel("Cuenta:", 12); FieldLabel("Concepto :", 37); FieldLabel("Valor :", 63);
         Put(Field(account, Colors.White, "Cuenta"), 80, 12, 90, 20);
         Put(JournalsPage.ActionButton("", "gl_search.png", PickAccount, 28), 174, 10, 28, 24);
@@ -67,6 +83,14 @@ internal sealed class MovementDialog : ClassicDialog
         concept.Completed += (_, _) => value.Focus();
         value.TextChanged += (_, _) => ShowSide();
         value.Completed += async (_, _) => { if (Calculate()) await Accept(); };
+        value.Focused += (_, _) => Dispatcher.Dispatch(() => { value.CursorPosition = 0; value.SelectionLength = value.Text?.Length ?? 0; });
+        value.TextChanged += async (_, e) =>
+        {
+            if (!IsVisible || postingShortcut || AmountExpression.TryPostingShortcut(e.NewTextValue) is not decimal signed) return;
+            postingShortcut = true;
+            try { value.Text = Format(signed); await Accept(); }
+            finally { postingShortcut = false; }
+        };
     }
 
     public void Show(string title, List<Account> detailAccounts, JournalLine? line, string defaultConcept, Action<JournalLine> onAccept)
@@ -133,6 +157,7 @@ internal sealed class MovementDialog : ClassicDialog
         var cents = (long)(Math.Abs(amount) * 100);
         accept?.Invoke(new JournalLine { AccountId = selected.Id, Concept = (concept.Text ?? "").Trim(),
             DebitCents = amount > 0 ? cents : 0, CreditCents = amount < 0 ? cents : 0 });
+        previousAccepted = new MovementDraft(selected.Code, (concept.Text ?? "").Trim(), Format(amount), -1);
         return Task.FromResult(true);
     }
 
@@ -146,3 +171,6 @@ internal sealed class MovementDialog : ClassicDialog
 
     private static string Format(decimal amount) => amount.ToString("0.00", CultureInfo.InvariantCulture);
 }
+
+
+

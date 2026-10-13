@@ -122,6 +122,7 @@ public class JournalsPage : AccountingPage
             return row;
         });
         table.SelectionChanged += (_, e) => Select(e.CurrentSelection.FirstOrDefault() as JournalDisplayRow);
+        CaptureShortcut.Enter(table, () => Guard(Edit));
 #if WINDOWS
         table.HandlerChanged += (_, _) =>
         {
@@ -287,10 +288,11 @@ public class JournalsPage : AccountingPage
     {
         if (selected == null) throw new InvalidOperationException("Seleccione una póliza.");
         var journal = selected.Journal;
-        var suggested = long.TryParse(journal.Reference, out var number) ? (number + 1).ToString() : journal.Reference + "-1";
+        var suggested = await db.NextJournalReference(company.Id, journal.Type, journal.Date);
         var reference = await DisplayPromptAsync("Duplicar póliza", $"Nueva referencia para la copia de {journal.Type}-{journal.Reference} (misma fecha, concepto y movimientos):",
-            "Duplicar", "Cancelar", initialValue: suggested, maxLength: 60);
+            "Duplicar", "Cancelar", initialValue: suggested, maxLength: 7);
         if (string.IsNullOrWhiteSpace(reference)) return;
+        AppDatabase.ValidateCaptureReference(reference.Trim(), journal.Date);
         await db.DuplicateJournal(company.Id, journal.Id, reference, journal.Date);
         await Load();
         Notice.Text = $"Póliza duplicada como {journal.Type}-{reference.Trim()}.";
@@ -321,3 +323,4 @@ public class JournalsPage : AccountingPage
         }
     }
 }
+

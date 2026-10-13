@@ -65,8 +65,8 @@ public sealed partial class AppDatabase
     }
     private static void ValidateCatalogPackage(IReadOnlyList<CatalogAccount> accounts)
     {
-        if (accounts.Count == 0 || accounts.Any(a => a.Code.Length == 0 || a.Code.Length > 40 || a.Description.Length == 0 || a.Description.Length > 200))
-            throw new InvalidOperationException("El catálogo debe contener cuentas con código y descripción válidos.");
+        if (accounts.Count == 0 || accounts.Any(a => a.Code.Length == 0 || a.Code.Length > Account.CodeMaxLength || a.ParentCode.Length > Account.CodeMaxLength || a.Description.Length == 0 || a.Description.Length > 200))
+            throw new InvalidOperationException("El catálogo debe contener cuentas de hasta 7 caracteres, incluido el punto, y descripciones válidas.");
         if (accounts.Select(a => a.Code).Distinct().Count() != accounts.Count) throw new InvalidOperationException("El catálogo contiene códigos repetidos.");
         var map = accounts.ToDictionary(a => a.Code);
         foreach (var account in accounts)
@@ -217,6 +217,7 @@ public sealed partial class AppDatabase
         return file;
     }
 }
+
 
 
 

@@ -6,6 +6,14 @@ namespace GestionLibros.Data;
 // Commas are thousands separators. Returns null for anything else.
 public static class AmountExpression
 {
+    public static decimal? TryPostingShortcut(string? text)
+    {
+        var input = (text ?? "").Trim();
+        if (input.Length < 2 || input[^1] is not ('+' or '-')) return null;
+        var amount = TryEvaluate(input[..^1]);
+        if (amount == null || amount == 0 || amount == decimal.MinValue) return null;
+        return input[^1] == '+' ? Math.Abs(amount.Value) : -Math.Abs(amount.Value);
+    }
     public static decimal? TryEvaluate(string? text)
     {
         var s = (text ?? "").Replace(",", "").Replace(" ", "");

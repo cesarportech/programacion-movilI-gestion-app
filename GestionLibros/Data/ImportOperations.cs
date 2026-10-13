@@ -17,8 +17,8 @@ public sealed partial class AppDatabase
         if (year is < 1900 or > 2100) throw new InvalidOperationException("El ejercicio del catálogo no es válido.");
         var incoming = source.Select(a => a with { Code = a.Code.Trim(), ParentCode = a.ParentCode.Trim(), Description = a.Description.Trim() }).ToList();
         foreach (var a in incoming)
-            if (a.Code.Length == 0 || a.Code.Length > 40 || a.Description.Length == 0 || a.Description.Length > 200)
-                throw new InvalidOperationException($"La cuenta {a.Code} no tiene un código o descripción válidos.");
+            if (a.Code.Length == 0 || a.Code.Length > Account.CodeMaxLength || a.ParentCode.Length > Account.CodeMaxLength || a.Description.Length == 0 || a.Description.Length > 200)
+                throw new InvalidOperationException($"La cuenta {a.Code} debe tener cuenta y superior de hasta 7 caracteres (incluido el punto) y una descripción válida.");
         var duplicate = incoming.GroupBy(a => a.Code).FirstOrDefault(g => g.Count() > 1);
         if (duplicate != null) throw new InvalidOperationException($"La cuenta {duplicate.Key} aparece repetida en el catálogo.");
 
@@ -101,4 +101,5 @@ public sealed partial class AppDatabase
         return new(added, skipped, balanceAccounts);
     }
 }
+
 

@@ -63,6 +63,37 @@ public sealed partial class AppDatabase
   });
   return result!;
  }
+ public static void ValidateCaptureReference(string reference, DateTime date)
+ {
+  var prefix = $"{date.Year % 10}{date.Month:00}";
+  if (reference.Length != 7 || reference.Any(c => c < '0' || c > '9') || !reference.StartsWith(prefix, StringComparison.Ordinal))
+   throw new InvalidOperationException($"La referencia debe tener 7 dígitos: {prefix} (año y mes) y 4 dígitos elegidos por el contador. Ejemplo: {prefix}0001.");
+ }
+ public async Task<string> NextJournalReference(int companyId, string type, DateTime date)
+ {
+  RequireCompany(companyId);
+  if (date.Year < 1900 || date.Year > 2100 || string.IsNullOrWhiteSpace(type)) throw new InvalidOperationException("Indique fecha y tipo de póliza.");
+  var prefix = $"{date.Year % 10}{date.Month:00}";
+  var journals = await Journals(companyId, date.Year, date.Month);
+  var matching = journals.Where(j => j.Type == type.Trim() && j.Reference.Length == 7 && j.Reference.All(c => c >= '0' && c <= '9') && j.Reference.StartsWith(prefix, StringComparison.Ordinal)).OrderByDescending(j => j.Id).ToList();
+  var next = matching.Count == 0 ? 1 : int.Parse(matching[0].Reference[3..], System.Globalization.CultureInfo.InvariantCulture) + 1;
+  var used = matching.Select(j => j.Reference).ToHashSet();
+  while (next <= 9999 && used.Contains(prefix + next.ToString("0000"))) next++;
+  if (next > 9999) throw new InvalidOperationException("Se agotó el consecutivo de cuatro dígitos de esta póliza y mes. No se generará una referencia de más de 7 dígitos.");
+  return prefix + next.ToString("0000");
+ }
+ public async Task<Journal?> PreviousJournalCapture(int companyId)
+ {
+  RequireCompany(companyId); var username = RequireSession().Username;
+  return (await db.Table<Journal>().Where(j => j.CompanyId == companyId && j.ChangedBy == username).ToListAsync())
+   .Where(j => string.IsNullOrEmpty(j.ImportBatchId)).OrderByDescending(j => j.ChangedAt).ThenByDescending(j => j.Id).FirstOrDefault();
+ }
+ // New interactive captures follow the numeric scheme; legacy imports retain their original references.
+ public Task SaveCapturedJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines, string? draftId = null, long? draftRevision = null)
+ {
+  RequireCompany(companyId); ValidateCaptureReference(draft.Reference.Trim(), draft.Date);
+  return SaveJournal(companyId, draft, lines, draftId, draftRevision);
+ }
  public async Task SaveJournal(int companyId, Journal draft, IReadOnlyList<JournalLine> lines, string? draftId = null, long? draftRevision = null)
  {
   RequireCompany(companyId);
@@ -131,4 +162,5 @@ public sealed partial class AppDatabase
   return BuildBalances(snapshot, start);
  }
 }
+
 

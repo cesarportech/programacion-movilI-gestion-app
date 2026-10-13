@@ -1,4 +1,4 @@
-﻿using SQLite;
+using SQLite;
 namespace GestionLibros.Models;
 public class Company
 {
@@ -31,6 +31,7 @@ public class LocalUser
 }
 public class Account
 {
+ public const int CodeMaxLength = 7;
  [PrimaryKey, AutoIncrement] public int Id { get; set; }
  [Indexed] public int CompanyId { get; set; }
  public string Code { get; set; } = "";
@@ -158,3 +159,4 @@ public class DetailedPeriod
 public record MigrationLine(string AccountCode, string Concept, long DebitCents, long CreditCents);
 public record MigrationJournal(string SourceId, string Type, string Reference, DateTime Date, string Concept, List<MigrationLine> Lines);
 public record MigrationDetailFile(int Year, int Month, List<MigrationJournal> Journals);
+

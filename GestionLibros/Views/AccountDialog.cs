@@ -9,8 +9,8 @@ internal sealed class AccountDialog : ClassicDialog
     private readonly AppDatabase db;
     private readonly Company company;
     private readonly Func<string, Task> saved;
-    private readonly Entry code = new() { MaxLength = 40 };
-    private readonly Entry parent = new() { MaxLength = 40 };
+    private readonly Entry code = new() { MaxLength = Account.CodeMaxLength };
+    private readonly Entry parent = new() { MaxLength = Account.CodeMaxLength };
     private readonly Entry level = new() { IsReadOnly = true };
     private readonly Entry last = new() { IsReadOnly = true };
     private readonly Entry description = new() { MaxLength = 200 };
@@ -78,3 +78,4 @@ internal sealed class AccountDialog : ClassicDialog
         return true;
     }
 }
+

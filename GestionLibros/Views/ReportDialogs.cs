@@ -114,7 +114,7 @@ internal abstract class ReportDialog : Grid
         return Group(grid);
     }
 
-    protected static Entry RangeField(string name) => TextField("", FieldGray, name);
+    protected static Entry RangeField(string name) { var field = TextField("", FieldGray, name); field.MaxLength = Account.CodeMaxLength; return field; }
 
     private async Task PickAccount(Entry target)
     {
@@ -388,3 +388,4 @@ internal sealed class PolicyTypesDialog : Grid
         catch (InvalidOperationException ex) { status.TextColor = Gl2000Chrome.NegativeRed; status.Text = ex.Message; }
     }
 }
+

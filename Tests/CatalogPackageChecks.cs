@@ -10,8 +10,10 @@ static class CatalogPackageChecks
   var path=Path.Combine(Path.GetTempPath(), $"fredi-packages-{Guid.NewGuid():N}.db3");
   var db=new AppDatabase(path); await db.Setup("master", "Master-packages-123"); await db.Login("master", "Master-packages-123");
   CatalogAccount[] accounts=[new("1","","Activo"),new("1.1","1","Caja")];
+  await db.PreloadCatalog("Seven", [new("1.12101", "", "Cuenta válida")]);
+  await Denied(()=>db.PreloadCatalog("Eight", [new("1.121012", "", "Cuenta larga")]),"Rejects eight characters including decimal point");
   var id=await db.PreloadCatalog("Base",accounts);
-  Check((await db.CatalogPackages()).Single().Id==id,"Master preloads structural package");
+  Check((await db.CatalogPackages()).Single(p=>p.Name=="Base").Id==id,"Master preloads structural package");
   await Denied(()=>db.PreloadCatalog("Base",accounts),"Existing package cannot be overwritten");
   await Denied(()=>db.PreloadCatalog("Invalid",[new("1","2","A"),new("2","1","B")]),"Circular package rejected");
   var unused = await db.PreloadCatalog("Unused", accounts);
@@ -39,6 +41,7 @@ static class CatalogPackageChecks
   Check((await db.Balances(company,2026,1)).All(b=>b.Closing==0),"Package adds no balance");
  }
 }
+
 
 
 

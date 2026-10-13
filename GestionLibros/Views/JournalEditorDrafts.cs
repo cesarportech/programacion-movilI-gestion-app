@@ -1,4 +1,4 @@
-﻿using GestionLibros.Models;
+using GestionLibros.Models;
 using System.Text.Json;
 namespace GestionLibros.Views;
 public partial class JournalEditor
@@ -69,7 +69,7 @@ public partial class JournalEditor
   draftRevision = db.StoreJournalDraft(draftId, company.Id, Capture(), draftRevision);
   var header = Capture().Header;
   IsEnabled = false;
-  await db.SaveJournal(company.Id, header, lines, draftId, draftRevision);
+  await db.SaveCapturedJournal(company.Id, header, lines, draftId, draftRevision);
   draftRevision = 0;
   original.Id = header.Id; original.ChangedAt = header.ChangedAt;
   baseline = Fingerprint();
@@ -126,3 +126,4 @@ internal static class PendingEdits
   return true;
  }
 }
+

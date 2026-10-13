@@ -67,6 +67,7 @@ internal sealed class AccountMovementsDialog : Grid
    if (selected != null) status.Text = selected.Row.IsImported ? "Acumulado GL2000 sin partidas diarias. " + selected.Row.Origin : selected.Row.Origin;
   };
   ClassicWorkspaceChrome.CompactRows(table);
+  CaptureShortcut.Enter(table, () => selected == null ? Task.CompletedTask : OpenJournal(selected));
   var ruled = Columns(); ruled.BackgroundColor = Gl2000Chrome.RowYellow;
   for (var i = 0; i < Widths.Length; i++) ruled.Add(new BoxView { WidthRequest = 1, HorizontalOptions = LayoutOptions.End, Color = Colors.Gray, InputTransparent = true }, i, 0);
   ruled.Add(table); Grid.SetColumnSpan(table, Widths.Length + 1);

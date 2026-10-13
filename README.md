@@ -131,3 +131,6 @@ Catálogos precargados: el maestro dispone de Archivos → Catálogos precargado
 
 En Maestro → Catálogos puede agregar archivos GL2000 como paquetes internos sin saldos, revisar sus cuentas y eliminar paquetes que no estén asignados. La comprobación de asignación se repite dentro de la transacción para impedir borrar un catálogo usado por una contabilidad. Al regresar a Administración se actualiza el selector de catálogos.
 
+
+Captura por teclado: Enter recorre Tipo → Referencia → Fecha → Concepto → movimiento y abre la póliza seleccionada en la tabla. En movimientos, Enter recorre Cuenta → Concepto → Valor. Un valor terminado en + agrega el cargo; terminado en - agrega el crédito, sin otro Enter. El movimiento queda en la póliza pendiente; los saldos solo cambian al aceptar la póliza. Las expresiones pueden escribirse entre paréntesis. F12 repite el campo de la captura anterior del usuario y contabilidad; en Referencia propone el siguiente consecutivo. Las nuevas referencias tienen 7 dígitos: año (último dígito), mes (2), consecutivo (4), independiente por tipo y período. Primera propuesta: 0001. Los consecutivos agotados o duplicados se rechazan sin guardar. Las referencias históricas almacenadas no se renumeran.
+
