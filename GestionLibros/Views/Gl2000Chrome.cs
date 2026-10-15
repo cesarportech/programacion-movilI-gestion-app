@@ -114,12 +114,11 @@ internal static class Gl2000Chrome
     {
         IconButton("Catálogo", "📘", () => open("catalog")),
         IconButton("Asientos", "🗒️", () => open("journals")),
-        IconButton("Acumular", "🚦", () => MenuActions.Accumulate(page)),
+        IconButton("Acumular", "🚦", () => open("accumulate")),
         IconButton("Consulta", "🔎", () => open("balances")),
         IconButton("Balanza", "⚖️", () => open("trial")),
         IconButton("Saldos", "🧮", () => open("saldos")),
         IconButton("Mayor", "📒", () => open("ledger")),
-        IconButton("Salir", "✖", exit),
         IconButton("Cerrar Sesión", "🔒", () => open("logout")),
     };
 
@@ -221,7 +220,7 @@ internal static class Gl2000Chrome
         O("Captura de Cheques");
         O("Consulta del Catálogo", () => Go("catalog", "Consulta del Catálogo"));
         O("Consulta de Bancos");
-        O("Acumular Saldos", () => MenuActions.Accumulate(page));
+        O("Acumular Saldos", () => Go("accumulate", "Acumular"));
         O("Cierre Anual");
         O("Impresión de Cheques");
         O("Impresión de Pólizas", () => Go("policy-print", "Impresión de Pólizas"));

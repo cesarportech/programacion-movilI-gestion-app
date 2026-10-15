@@ -149,7 +149,7 @@ internal static class ClassicWorkspaceChrome
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
             ("Asientos", "gl_journals.png", "journals"), ("Acumular", "gl_accumulate.png", "accumulate"),
             ("Consulta", "gl_query.png", "balances"), ("Balanza", "gl_trial.png", "trial"),
-            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
+            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger") })
             tools.Children.Add(Tool(caption, image, () => open(key)));
         tools.Children.Add(SignOutTool(() => open("logout")));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };

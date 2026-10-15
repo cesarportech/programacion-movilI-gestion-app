@@ -27,7 +27,7 @@ public partial class JournalEditor
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
             ("Asientos", "gl_journals.png", "journals"), ("Acumular", "gl_accumulate.png", "accumulate"),
             ("Consulta", "gl_query.png", "balances"), ("Balanza", "gl_trial.png", "trial"),
-            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
+            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger") })
             tools.Children.Add(ClassicWorkspaceChrome.Tool(caption, image, () => OpenModule(key)));
         tools.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => OpenModule("logout")));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
@@ -194,7 +194,7 @@ public partial class JournalEditor
     private Task OpenModule(string key) => Guard(async () =>
     {
         if (key == "exit") { await Leave(); return; }
-        if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
+        if (key == "accumulate") { await MenuActions.Accumulate(this, db); return; }
         await Gl2000Chrome.Navigate(this, db, company, original.Date.Year, original.Date.Month, key);
     });
 }

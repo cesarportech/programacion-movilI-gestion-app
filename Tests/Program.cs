@@ -1,4 +1,7 @@
 using GestionLibros.Data;
+if (args.Length == 3 && args[0] == "--cloud-export") { await new AppDatabase(args[1]).MaintenanceExportCloud(args[2]); return; }
+if (args.Length == 3 && args[0] == "--cloud-ack") { await new AppDatabase(args[1]).MaintenanceAckCloud(args[2]); return; }
+if (args.Length == 1 && args[0] == "--cloud-checks") { await CloudSyncChecks.Run(); return; }
 var path = Path.Combine(Path.GetTempPath(), $"fredi-tests-{Guid.NewGuid():N}.db3");
 var db = new AppDatabase(path);
 void Check(bool condition, string description) { if (!condition) throw new Exception(description); Console.WriteLine("PASS " + description); }
@@ -100,3 +103,5 @@ await MigrationChecks.Run();
 await DrilldownChecks.Run();
 await CatalogPackageChecks.Run();
 await CaptureReferenceChecks.Run();
+
+await CloudSyncChecks.Run();

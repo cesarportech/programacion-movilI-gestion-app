@@ -38,12 +38,11 @@ public class WorkspacePage : AccountingPage
         var tools = new HorizontalStackLayout { Spacing = 1, Padding = new Thickness(3, 2, 0, 0) };
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Catálogo", "gl_catalog.png", () => Open("catalog")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Asientos", "gl_journals.png", () => Open("journals")));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Acumular", "gl_accumulate.png", () => MenuActions.Accumulate(this)));
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Acumular", "gl_accumulate.png", () => MenuActions.Accumulate(this, db)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Consulta", "gl_query.png", () => Open("balances")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Balanza", "gl_trial.png", () => Open("trial")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Saldos", "gl_balances.png", () => Open("saldos")));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Mayor", "gl_ledger.png", () => Open("ledger")));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Salir", "gl_exit.png", () => { CloseApp(); return Task.CompletedTask; }));
         tools.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => SessionActions.SignOut(this, db)));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
         period.Children.Add(ClassicWorkspaceChrome.Text("Mes", true));

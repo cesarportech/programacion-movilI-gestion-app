@@ -44,7 +44,7 @@ public class AdminPage : AccountingPage
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Catálogos", "gl_catalog.png", () => Run(ManageCatalogs)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Conectados", "gl_query.png", () => Run(ShowSessions)));
         tools.Children.Add(ClassicWorkspaceChrome.Tool("Respaldo", "gl_policy.png", () => Run(Backup)));
-        tools.Children.Add(ClassicWorkspaceChrome.Tool("Salir", "gl_exit.png", () => { CloseApp(); return Task.CompletedTask; }));
+        tools.Children.Add(ClassicWorkspaceChrome.Tool("Acumular", "gl_accumulate.png", () => MenuActions.Accumulate(this, db)));
         tools.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => SessionActions.SignOut(this, db)));
         var toolbar = new Border { Stroke = Colors.Gray, StrokeThickness = 1, Padding = 0, Background = ClassicWorkspaceChrome.ToolbarBrush(), Content = tools };
 

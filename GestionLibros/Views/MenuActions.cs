@@ -23,14 +23,16 @@ internal static class MenuActions
 
     internal static string? NotApplicableReason(string name) => NotApplicable.GetValueOrDefault(name);
 
-    internal const string AccumulateText = "En FREDI los saldos se acumulan solos: Consulta, Balanza, Saldos, Mayor y los estados financieros " +
-        "se calculan con todas las pólizas guardadas al momento de abrirlos. No hace falta Acumular Saldos.";
-
     // Operators reach Empresas / Usuarios from the GL menu; only the master administers them.
     internal static Task AdminOnly(Page page) => page.DisplayAlertAsync("Empresas y Usuarios",
         "Solo el usuario maestro crea contabilidades y usuarios. Cierre sesión y entre como maestro para administrarlos.", "Entendido");
 
-    internal static Task Accumulate(Page page) => page.DisplayAlertAsync("Acumular Saldos", AccumulateText, "Entendido");
+    internal static Task Accumulate(Page page, AppDatabase db)
+    {
+        if (page is ContentPage host && host.Content is Grid root && root.Children.OfType<CloudSyncDialog>().Any()) return Task.CompletedTask;
+        ReportDialog.Show(page, new CloudSyncDialog(page, db));
+        return Task.CompletedTask;
+    }
 
     // Returns true when the key was handled here.
     internal static async Task<bool> TryRun(Page page, AppDatabase db, Company company, int year, int month, string key)
@@ -40,7 +42,7 @@ internal static class MenuActions
             case "migration": await MigrationActions.Run(page, db, company); return true;
             case "import-catalog": await CatalogImport.Run(page, db, company, year, month); return true;
             case "logout": await SessionActions.SignOut(page, db); return true;
-            case "accumulate": await Accumulate(page); return true;
+            case "accumulate": await Accumulate(page, db); return true;
             case "admin": await AdminOnly(page); return true;
             case "policy-types": ReportDialog.Show(page, new PolicyTypesDialog(page, db, company)); return true;
             case "backup": await Backup(page, db); return true;

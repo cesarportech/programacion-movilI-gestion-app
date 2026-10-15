@@ -33,6 +33,7 @@ public sealed partial class AppDatabase
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ImportedBalance_Period ON ImportedBalance (AccountId, Year, Month)");
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Journal_Reference ON Journal (CompanyId, Year, Type, Reference)");
    await db.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Account_Company_Code ON Account (CompanyId, Code)");
+   await InitializeCloudTracking();
    ready = true;
   } finally { gate.Release(); }
  }

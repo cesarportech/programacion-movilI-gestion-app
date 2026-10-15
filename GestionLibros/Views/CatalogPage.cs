@@ -243,7 +243,7 @@ public class CatalogPage : AccountingPage
     {
         if (key == "exit") { await Navigation.PopAsync(); return; }
         if (key == "catalog") { await Load(); return; }
-        if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
+        if (key == "accumulate") { await MenuActions.Accumulate(this, db); return; }
         await Gl2000Chrome.Navigate(this, db, company, year, month, key);
     });
 

@@ -50,7 +50,7 @@ public class JournalsPage : AccountingPage
         foreach (var (caption, image, key) in new[] { ("Catálogo", "gl_catalog.png", "catalog"),
             ("Asientos", "gl_journals.png", "journals"), ("Acumular", "gl_accumulate.png", "accumulate"),
             ("Consulta", "gl_query.png", "balances"), ("Balanza", "gl_trial.png", "trial"),
-            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger"), ("Salir", "gl_exit.png", "exit") })
+            ("Saldos", "gl_balances.png", "saldos"), ("Mayor", "gl_ledger.png", "ledger") })
             toolbar.Children.Add(ClassicWorkspaceChrome.Tool(caption, image, () => Open(key)));
         toolbar.Children.Add(ClassicWorkspaceChrome.SignOutTool(() => Open("logout")));
         var period = new HorizontalStackLayout { Spacing = 5, Margin = new Thickness(67, 4, 0, 0), VerticalOptions = LayoutOptions.Start };
@@ -303,7 +303,7 @@ public class JournalsPage : AccountingPage
     {
         if (key == "exit") { await Navigation.PopAsync(); return; }
         if (key == "journals") { await Load(); return; }
-        if (key == "accumulate") { await MenuActions.Accumulate(this); return; }
+        if (key == "accumulate") { await MenuActions.Accumulate(this, db); return; }
         await Gl2000Chrome.Navigate(this, db, company, year, month, key);
     });
 
