@@ -20,19 +20,45 @@ public partial class JournalEditor
   date.DateSelected += (_, _) => PersistDraft();
   movementDialog.Changed += PersistDraft;
  }
+ // Draft snapshots are debounced and written off the UI thread: every key press used to serialize the
+ // whole póliza twice and run a synchronous SQLite transaction (with fsync) on the UI thread. Now edits
+ // restart a short timer; when typing pauses the snapshot is captured on the UI thread and written in
+ // the background, one write at a time (draftGate keeps the revision sequence consistent).
+ private static readonly TimeSpan DraftDelay = TimeSpan.FromMilliseconds(400);
+ private IDispatcherTimer? draftTimer;
+ private readonly SemaphoreSlim draftGate = new(1, 1);
  private void PersistDraft()
  {
   if (viewOnly || !loaded || restoring) return;
+  if (draftTimer == null)
+  {
+   draftTimer = Dispatcher.CreateTimer(); draftTimer.Interval = DraftDelay; draftTimer.IsRepeating = false;
+   draftTimer.Tick += async (_, _) => await FlushDraft();
+  }
+  draftTimer.Stop(); draftTimer.Start();
+ }
+ private async Task FlushDraft()
+ {
+  draftTimer?.Stop();
+  if (viewOnly || !loaded || restoring) return;
+  await draftGate.WaitAsync();
   try
   {
-   if (HasPendingChanges) draftRevision = db.StoreJournalDraft(draftId, company.Id, Capture(), draftRevision);
-   else { db.DeleteJournalDraft(draftId, company.Id, draftRevision); draftRevision = 0; }
+   // Captured after taking the turn (back on the UI thread), so a save that finished meanwhile is seen.
+   if (viewOnly || restoring || saving) return;
+   var content = Capture(); var reference = baseline; var id = draftId; var revision = draftRevision;
+   draftRevision = await Task.Run(() =>
+   {
+    if (JsonSerializer.Serialize(content) != reference) return db.StoreJournalDraft(id, company.Id, content, revision);
+    db.DeleteJournalDraft(id, company.Id, revision); return 0L;
+   });
   }
   catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); Notice.Text = "No se pudo guardar el borrador de recuperación. Mantenga la ventana abierta."; }
+  finally { draftGate.Release(); }
  }
  private async Task RecoverDraft()
  {
-  var drafts = db.JournalDrafts(company.Id, original.Id);
+  var drafts = await Task.Run(() => db.JournalDrafts(company.Id, original.Id));
   if (drafts.Count == 0) return;
   var labels = drafts.Select(d => $"{d.UpdatedUtc.ToLocalTime():dd/MM/yyyy HH:mm:ss} · {d.Id}").ToArray();
   var choice = await DisplayActionSheetAsync("Borradores pendientes (no afectan saldos)", "Abrir sin recuperar", null, labels);
@@ -62,20 +88,24 @@ public partial class JournalEditor
  {
   if (viewOnly || saving) return false;
   saving = true;
+  draftTimer?.Stop();
+  await draftGate.WaitAsync(); // a background draft write must finish before saving
   try
   {
   if (!await movementDialog.CommitPending()) return false;
   if (date.Date == null) throw new InvalidOperationException("Indique una fecha.");
-  draftRevision = db.StoreJournalDraft(draftId, company.Id, Capture(), draftRevision);
+  var content = Capture(); var id = draftId; var revision = draftRevision;
+  draftRevision = await Task.Run(() => db.StoreJournalDraft(id, company.Id, content, revision));
   var header = Capture().Header;
   IsEnabled = false;
   await db.SaveCapturedJournal(company.Id, header, lines, draftId, draftRevision);
   draftRevision = 0;
   original.Id = header.Id; original.ChangedAt = header.ChangedAt;
   baseline = Fingerprint();
+  draftTimer?.Stop(); // edits made while saving are already part of the saved póliza
   return true;
   }
-  finally { saving = false; IsEnabled = true; }
+  finally { saving = false; IsEnabled = true; draftGate.Release(); }
  }
  public async Task<bool> ConfirmLeave(Page prompt)
  {
@@ -87,8 +117,15 @@ public partial class JournalEditor
    var choice = await prompt.DisplayActionSheetAsync("Póliza con cambios sin guardar", "Continuar editando", "Descartar", "Guardar");
    if (choice == "Guardar") return await SavePending();
    if (choice != "Descartar") return false;
-   db.DeleteJournalDraft(draftId, company.Id, draftRevision);
-   draftRevision = 0;
+   draftTimer?.Stop();
+   await draftGate.WaitAsync();
+   try
+   {
+    var id = draftId; var revision = draftRevision;
+    await Task.Run(() => db.DeleteJournalDraft(id, company.Id, revision));
+    draftRevision = 0;
+   }
+   finally { draftGate.Release(); }
    restoring = true;
    try
    {

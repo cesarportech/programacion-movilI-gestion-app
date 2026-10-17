@@ -90,13 +90,7 @@ public class LoginPage : ContentPage
         base.OnAppearing();
         try
         {
-            // A remembered session skips the login until the user signs out.
-            var token = await SessionStore.Load();
-            if (token != null)
-            {
-                if (await database.Resume(token)) { EnterWorkspace(); return; }
-                SessionStore.Clear();
-            }
+            // StartupPage alone resumes remembered tokens. Logout/revocation always shows login.
             setup = await database.NeedsSetup();
             ready = true;
             LayoutForm();

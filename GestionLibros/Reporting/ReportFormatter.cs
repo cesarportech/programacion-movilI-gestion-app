@@ -100,6 +100,46 @@ public static class ReportFormatter
     }
 
     // Impresión de Pólizas: each póliza with its header, movements and Sumas Iguales.
+    private static readonly string[] EntryHeaders = ["Pol  Ref", "Fecha", "Cuenta", "Descripción", "Concepto", "Cargos", "Créditos"];
+
+    // GL2000 "Reporte de Asientos Contables": póliza, date and each movement, with Totales per póliza.
+    public static ReportDocument JournalEntries(string company, IReadOnlyList<PolicyPrint> policies)
+    {
+        var rows = new List<ReportRow>();
+        foreach (var policy in policies)
+        {
+            var j = policy.Journal;
+            if (rows.Count > 0) rows.Add(new([T(""), T(""), T(""), T(""), T(""), T(""), T("")]));
+            for (var i = 0; i < policy.Lines.Count; i++)
+            {
+                var l = policy.Lines[i];
+                rows.Add(new([T(i == 0 ? $"{j.Type}  {j.Reference}" : ""), T(i == 0 ? j.Date.ToString("d/M/yyyy") : ""),
+                    T(l.AccountCode), T(l.AccountName), T(l.Concept), M(l.Debits), M(l.Credits)]));
+            }
+            rows.Add(new([T(""), T(""), T(""), T(""), T("Totales:"), M(policy.Lines.Sum(l => l.Debits)), M(policy.Lines.Sum(l => l.Credits))], true));
+        }
+        return new("Reporte de Asientos Contables", company, "", "", EntryHeaders, rows, "Pólizas de FREDI.");
+    }
+
+    // Same report as an Excel sheet: real numbers (#,##0.00) and bold totals.
+    public static Xlsx.Sheet JournalEntriesSheet(string company, IReadOnlyList<PolicyPrint> policies)
+    {
+        var rows = new List<IReadOnlyList<object?>> { new object?[] { company }, new object?[] { "Reporte de Asientos Contables" }, Array.Empty<object?>(), EntryHeaders };
+        foreach (var policy in policies)
+        {
+            var j = policy.Journal;
+            for (var i = 0; i < policy.Lines.Count; i++)
+            {
+                var l = policy.Lines[i];
+                rows.Add(new object?[] { i == 0 ? $"{j.Type}  {j.Reference}" : null, i == 0 ? j.Date.ToString("d/M/yyyy") : null,
+                    l.AccountCode, l.AccountName, l.Concept, l.Debits == 0 ? null : l.Debits / 100m, l.Credits == 0 ? null : l.Credits / 100m });
+            }
+            rows.Add(new object?[] { null, null, null, null, "Totales:", new Xlsx.Total(policy.Lines.Sum(l => l.Debits) / 100m), new Xlsx.Total(policy.Lines.Sum(l => l.Credits) / 100m) });
+            rows.Add(Array.Empty<object?>());
+        }
+        return new("Asientos", rows, HeaderRow: 3, Widths: [12, 11, 11, 32, 32, 15, 15]);
+    }
+
     public static ReportDocument Policies(string company, int year, int fromMonth, int throughMonth, IReadOnlyList<PolicyPrint> policies)
     {
         var rows = new List<ReportRow>();
@@ -258,8 +298,10 @@ public static class ReportFormatter
         output.Append("</head><body><div class='page'>");
         if (printButton) output.Append("<button class='print' onclick='window.print()'>Imprimir / Guardar PDF</button>");
         output.Append("<p class='company'>").Append(E(document.Company)).Append("</p><p class='title'>").Append(E(document.Title)).Append("</p>");
-        output.Append("<div class='period'><strong>").Append(E(document.Period)).Append("</strong><span>Fecha&nbsp; ")
-            .Append(MonthAbbreviations[date.Month - 1]).Append(' ').Append(date.Day).Append(',').Append(date.Year).Append("</span></div>");
+        // Reports without a period (e.g. Reporte de Asientos Contables) print only company and title, as in the GL.
+        if (document.Period.Length > 0)
+            output.Append("<div class='period'><strong>").Append(E(document.Period)).Append("</strong><span>Fecha&nbsp; ")
+                .Append(MonthAbbreviations[date.Month - 1]).Append(' ').Append(date.Day).Append(',').Append(date.Year).Append("</span></div>");
         if (!string.IsNullOrWhiteSpace(document.Options)) output.Append("<p class='options'>").Append(E(document.Options)).Append("</p>");
         output.Append("<table><thead><tr>");
         var numeric = document.Headers.Select((_, i) => document.Rows.Any(r => i < r.Cells.Count && r.Cells[i].Numeric)).ToArray();

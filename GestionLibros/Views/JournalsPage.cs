@@ -75,6 +75,7 @@ public partial class JournalEditor : AccountingPage
   sums.Text = debit == credit ? "Sumas Iguales :" : "Diferencia: " + AccountingUi.Money(debit-credit);
   sums.TextColor = debit == credit ? Colors.Blue : Colors.DarkRed;
   debitTotal.Text = AccountingUi.Money(debit); creditTotal.Text = AccountingUi.Money(credit);
+  UpdateImportButton();
   PersistDraft();
  }
 }

@@ -264,8 +264,11 @@ internal static class ClassicWorkspaceChrome
     }
 
 #if WINDOWS
-    private static void CollapseToolbars(Microsoft.UI.Xaml.DependencyObject parent)
+    // Walks only MAUI's window chrome: it stops at the page content (ContentGrid's ContentPresenter), which
+    // holds the screen with possibly hundreds of rows, so showing a page no longer traverses all of it.
+    private static void CollapseToolbars(Microsoft.UI.Xaml.DependencyObject parent, int depth = 0)
     {
+        if (depth > 24) return;
         var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
         for (var i = 0; i < count; i++)
         {
@@ -304,7 +307,9 @@ internal static class ClassicWorkspaceChrome
                     if (row < grid.RowDefinitions.Count) grid.RowDefinitions[row].Height = new Microsoft.UI.Xaml.GridLength(0);
                 }
             }
-            else CollapseToolbars(child);
+            else if (child is Microsoft.UI.Xaml.Controls.ContentPresenter { Name: "ContentPresenter" } &&
+                     parent is Microsoft.UI.Xaml.FrameworkElement { Name: "ContentGrid" }) continue;
+            else CollapseToolbars(child, depth + 1);
         }
     }
 #endif

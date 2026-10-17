@@ -11,6 +11,7 @@ internal sealed class CloudSyncDialog : Grid
     private readonly Entry api = new() { Text = "", IsSpellCheckEnabled = false };
     private readonly View configure;
     private readonly Page owner;
+    private readonly CloudLoadingOverlay loading;
     private CancellationTokenSource? cancellation;
     private bool closeRequested;
     private bool busy;
@@ -59,13 +60,15 @@ internal sealed class CloudSyncDialog : Grid
         body.Add(buttons, 0, 2);
         var window = ClassicDialog.ChildWindow(ClassicWorkspaceChrome.Text("Acumular · nube de pruebas"), body, 580, () => _ = RequestClose());
         Add(window);
+        loading = new CloudLoadingOverlay(status, RequestClose);
+        Add(loading);
         SizeChanged += (_, _) =>
         {
             if (Width > 0) window.WidthRequest = Math.Min(580, Math.Max(280, Width - 16));
             if (Height > 0) body.HeightRequest = Math.Min(master ? 390 : 300, Math.Max(150, Height - 50));
         };
         Loaded += async (_, _) => { try { await Refresh(); password.Focus(); } catch (InvalidOperationException ex) { status.Text = ex.Message; } };
-        Unloaded += (_, _) => cancellation?.Cancel();
+        Unloaded += (_, _) => { cancellation?.Cancel(); loading.Stop(); };
     }
     private async Task Configure()
     {
@@ -84,7 +87,7 @@ internal sealed class CloudSyncDialog : Grid
     private Task RequestClose()
     {
         closeRequested = true;
-        if (busy) { status.Text = "Cancelando… Los envíos sin confirmar quedarán pendientes."; cancellation?.Cancel(); }
+        if (busy) { status.Text = "Cancelando… Los envíos sin confirmar quedarán pendientes."; loading.Cancelling(); cancellation?.Cancel(); }
         else Close();
         return Task.CompletedTask;
     }
@@ -113,6 +116,7 @@ internal sealed class CloudSyncDialog : Grid
             if (pending.Count == 0) { status.Text = "Todos los cambios guardados ya están confirmados en la nube."; return; }
             if (string.IsNullOrEmpty(password.Text)) { status.Text = "Escriba su contraseña para autorizar el envío."; return; }
             status.Text = "Conectando con la nube…";
+            loading.Start();
             token.ThrowIfCancellationRequested();
             await client.Login(await db.CloudDataset(), user.Username, password.Text, token); password.Text = "";
             var completed = 0;
@@ -137,6 +141,6 @@ internal sealed class CloudSyncDialog : Grid
         { status.Text = "No se pudo confirmar la conexión. Sus datos siguen guardados localmente y los envíos sin confirmar quedan pendientes. Vuelva a Acumular cuando tenga conexión."; }
         catch (InvalidOperationException ex) { status.Text = ex.Message; }
         catch { status.Text = "No se pudo completar la sincronización. Se conservan los envíos pendientes."; }
-        finally { password.Text = ""; if (client != null) { await client.Logout(); client.Dispose(); } cancellation.Dispose(); cancellation = null; busy = false; send.IsEnabled = configure.IsEnabled = password.IsEnabled = api.IsEnabled = true; if (closeRequested) Close(); }
+        finally { password.Text = ""; if (client != null) { await client.Logout(); client.Dispose(); } loading.Stop(); cancellation.Dispose(); cancellation = null; busy = false; send.IsEnabled = configure.IsEnabled = password.IsEnabled = api.IsEnabled = true; if (closeRequested) Close(); }
     }
 }

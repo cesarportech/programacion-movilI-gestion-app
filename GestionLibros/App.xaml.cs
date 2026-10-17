@@ -15,19 +15,29 @@ public partial class App : Application
  }
  protected override Window CreateWindow(IActivationState? activationState)
  {
-  var window = new Window(new LoginPage(Database));
+  var window = new Window(new StartupPage(Database));
   var timer = Dispatcher.CreateTimer(); timer.Interval = TimeSpan.FromSeconds(5);
-  void Check(bool activity = false)
+  var checking = 0;
+  // The session check reads (and occasionally writes) SQLite, so it runs off the UI thread and never
+  // overlaps itself. Revocation is still noticed within 5 s; SessionInvalidated returns to login.
+  void Check()
   {
-   if (Database.Session == null) return;
-   try { Database.ValidateSession(activity); }
-   catch (InvalidOperationException) { /* Revocation event returns the window to login. */ }
-   catch (Exception ex)
+   if (Database.Session == null || Interlocked.Exchange(ref checking, 1) == 1) return;
+   _ = Task.Run(() =>
    {
-    System.Diagnostics.Debug.WriteLine(ex);
-    Database.Logout(); SessionStore.Clear();
-    window.Page = new LoginPage(Database, "No se pudo verificar la sesión. Inicie sesión nuevamente.");
-   }
+    try { Database.ValidateSession(false); }
+    catch (InvalidOperationException) { /* Revocation event returns the window to login. */ }
+    catch (Exception ex)
+    {
+     System.Diagnostics.Debug.WriteLine(ex);
+     Dispatcher.Dispatch(() =>
+     {
+      Database.Logout(); SessionStore.Clear();
+      window.Page = new LoginPage(Database, "No se pudo verificar la sesión. Inicie sesión nuevamente.");
+     });
+    }
+    finally { Interlocked.Exchange(ref checking, 0); }
+   });
   }
   timer.Tick += (_, _) => Check();
   window.Activated += (_, _) => Check();
@@ -36,6 +46,7 @@ public partial class App : Application
 #if WINDOWS
    if (window.Handler?.PlatformView is Microsoft.UI.Xaml.Window closeWindow)
    {
+    closeWindow.AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "fredi.ico"));
     bool allowClose = false, asking = false;
     closeWindow.AppWindow.Closing += async (_, args) =>
     {
@@ -51,12 +62,13 @@ public partial class App : Application
     };
    }
    // Handled events included: typing and clicks in child controls renew activity, never the timer.
+   // Only an in-memory timestamp is updated here: no database access on the input path.
    if (window.Handler?.PlatformView is Microsoft.UI.Xaml.Window native && native.Content is Microsoft.UI.Xaml.UIElement root)
    {
     root.AddHandler(Microsoft.UI.Xaml.UIElement.PointerPressedEvent,
-     new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => Check(true)), true);
+     new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => Database.NoteActivity()), true);
     root.AddHandler(Microsoft.UI.Xaml.UIElement.KeyDownEvent,
-     new Microsoft.UI.Xaml.Input.KeyEventHandler((_, _) => Check(true)), true);
+     new Microsoft.UI.Xaml.Input.KeyEventHandler((_, _) => Database.NoteActivity()), true);
    }
 #endif
    timer.Start();

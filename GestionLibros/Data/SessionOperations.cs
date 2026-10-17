@@ -9,16 +9,32 @@ public sealed partial class AppDatabase
 {
     private string? tokenHash;
     private long sessionVersion;
-    private DateTime sessionStartedUtc, lastActivityUtc;
+    private DateTime sessionStartedUtc, lastActivityUtc, lastActivityPersistedUtc;
+    // Guards the activity timestamps: input events record activity from the UI thread while the
+    // periodic validation runs on a background thread.
+    private readonly object activityGate = new();
     public static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(8);
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(15);
+    // Activity is kept in memory on every click/key; the remembered token's LastUsedAt is written at most
+    // this often, so typing no longer causes a disk write (and fsync) per keystroke.
+    public static readonly TimeSpan ActivityPersistInterval = TimeSpan.FromMinutes(1);
     public event EventHandler<string>? SessionInvalidated;
 
     private void StartSession(LocalUser user, DateTime started, DateTime activity)
     {
         sessionVersion = user.SecurityVersion;
-        sessionStartedUtc = started; lastActivityUtc = activity;
+        lock (activityGate) { sessionStartedUtc = started; lastActivityUtc = lastActivityPersistedUtc = activity; }
         session = new(user.Id, user.Username, user.IsMaster, user.CompanyId);
+    }
+
+    // Records user activity without touching the database (called on every click and key press).
+    // An already idle-expired session is not revived: the next validation still locks it.
+    public void NoteActivity()
+    {
+        if (session == null) return;
+        var now = clock.GetUtcNow().UtcDateTime;
+        lock (activityGate)
+            if (now >= lastActivityUtc && now - lastActivityUtc < IdleTimeout) lastActivityUtc = now;
     }
 
     // Background checks do not renew activity. Every protected operation checks the stored user.
@@ -29,6 +45,8 @@ public sealed partial class AppDatabase
         using (connection.Lock())
         {
             var now = clock.GetUtcNow().UtcDateTime;
+            DateTime lastActivityUtc;
+            lock (activityGate) lastActivityUtc = this.lastActivityUtc;
             var user = connection.Find<LocalUser>(current.UserId);
             var token = tokenHash == null ? null : connection.Table<SessionToken>().FirstOrDefault(t => t.TokenHash == tokenHash);
             var reason = user == null || user.Disabled || user.SecurityVersion != sessionVersion ||
@@ -49,8 +67,25 @@ public sealed partial class AppDatabase
             }
             if (activity)
             {
-                lastActivityUtc = now;
-                if (token != null) connection.Execute("UPDATE SessionToken SET LastUsedAt = ? WHERE Id = ?", now, token.Id);
+                bool persist;
+                lock (activityGate)
+                {
+                    this.lastActivityUtc = now;
+                    persist = now - lastActivityPersistedUtc >= ActivityPersistInterval;
+                    if (persist) lastActivityPersistedUtc = now;
+                }
+                if (token != null && persist) connection.Execute("UPDATE SessionToken SET LastUsedAt = ? WHERE Id = ?", now, token.Id);
+            }
+            else if (token != null)
+            {
+                // Periodic check: store the in-memory activity (from NoteActivity) once per interval.
+                bool persist;
+                lock (activityGate)
+                {
+                    persist = lastActivityUtc - lastActivityPersistedUtc >= ActivityPersistInterval;
+                    if (persist) lastActivityPersistedUtc = lastActivityUtc;
+                }
+                if (persist) connection.Execute("UPDATE SessionToken SET LastUsedAt = ? WHERE Id = ?", lastActivityUtc, token.Id);
             }
             return current;
         }

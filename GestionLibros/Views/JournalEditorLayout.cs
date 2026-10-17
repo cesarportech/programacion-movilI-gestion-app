@@ -86,7 +86,8 @@ public partial class JournalEditor
             {
                 if (lines.Count == 0) return;
                 var index = step == int.MinValue ? 0 : step == int.MaxValue ? lines.Count - 1 : Math.Clamp(lines.IndexOf(selected!) + step, 0, lines.Count - 1);
-                selected = lines[index]; Render();
+                // Only the highlight moves; rebuilding every row (Render) made each click cost O(rows).
+                SelectMovement(lines[index]);
                 await movementScroll.ScrollToAsync((Element)rows.Children[index], ScrollToPosition.MakeVisible, false);
             };
             navigation.Children.Add(button);
@@ -99,8 +100,7 @@ public partial class JournalEditor
         var actions = new Grid { ColumnDefinitions = { new ColumnDefinition(300), new ColumnDefinition(111), new ColumnDefinition(97), new ColumnDefinition(98), new ColumnDefinition(GridLength.Star) }, Padding = new Thickness(10, 3) };
         var edits = new HorizontalStackLayout { Spacing = 4 };
         edits.Children.Add(JournalsPage.ActionButton("Agregar", "gl_add.png", () => EditLine(null), 88));
-        edits.Children.Add(JournalsPage.ActionButton("Cambiar", "gl_change.png", () => Guard(async () =>
-        { if (selected == null) throw new InvalidOperationException("Seleccione un movimiento."); await PushLine(selected); }), 88));
+        edits.Children.Add(JournalsPage.ActionButton("Cambiar", "gl_change.png", ChangeSelectedMovement, 88));
         edits.Children.Add(JournalsPage.ActionButton("Borrar", "gl_delete.png", () => Guard(async () =>
         {
             if (selected == null) throw new InvalidOperationException("Seleccione un movimiento.");
@@ -122,6 +122,7 @@ public partial class JournalEditor
         var tab = new Border { HorizontalOptions = LayoutOptions.Start, WidthRequest = 55, BackgroundColor = Color.FromArgb("#91F4CE"),
             Stroke = Colors.Gray, StrokeThickness = 1, Padding = new Thickness(3, 0), Content = ClassicWorkspaceChrome.Text("General", true) };
         var footer = new HorizontalStackLayout { HorizontalOptions = LayoutOptions.End, Spacing = 5, Padding = new Thickness(0, 2, 3, 0) };
+        footer.Children.Add(TransferButtons());
         footer.Children.Add(JournalsPage.ActionButton(viewOnly ? "Volver" : "Aceptar", "gl_accept.png", () => Guard(async () =>
         {
             if (viewOnly || await SavePending()) await Navigation.PopAsync();
@@ -157,6 +158,26 @@ public partial class JournalEditor
         grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star)); return grid;
     }
 
+    private Task ChangeSelectedMovement() => Guard(async () =>
+    {
+        if (viewOnly) return;
+        if (selected == null) throw new InvalidOperationException("Seleccione un movimiento.");
+        await PushLine(selected);
+    });
+
+    private void SelectMovement(JournalLine line)
+    {
+        selected = line;
+        // Keep the same visual rows alive so the second click can complete a double tap.
+        foreach (var row in rows.Children.OfType<Grid>())
+        {
+            var active = ReferenceEquals(row.BindingContext, line);
+            row.BackgroundColor = active ? Color.FromArgb("#0078D7") : Colors.Transparent;
+            foreach (var label in row.Children.OfType<Label>())
+                label.TextColor = active ? Colors.White : Grid.GetColumn(label) < 2 ? Colors.Blue : Colors.Black;
+        }
+    }
+
     private View MovementRow(string[] values, JournalLine line)
     {
         var row = MovementColumns(); row.HeightRequest = 16;
@@ -168,9 +189,10 @@ public partial class JournalEditor
             if (i >= 3) label.HorizontalTextAlignment = TextAlignment.End;
             row.Add(label, i, 0);
         }
-        var tap = new TapGestureRecognizer(); tap.Tapped += (_, _) => { selected = line; Render(); }; row.GestureRecognizers.Add(tap);
+        row.BindingContext = line;
+        var tap = new TapGestureRecognizer(); tap.Tapped += (_, _) => SelectMovement(line); row.GestureRecognizers.Add(tap);
         var doubleTap = new TapGestureRecognizer { NumberOfTapsRequired = 2 };
-        doubleTap.Tapped += async (_, _) => { selected = line; Render(); await EditLine(line); };
+        doubleTap.Tapped += async (_, _) => { SelectMovement(line); await ChangeSelectedMovement(); };
         row.GestureRecognizers.Add(doubleTap);
         return row;
     }

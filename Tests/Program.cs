@@ -92,6 +92,8 @@ Check((await db.Lines(a, unchanged.Id)).Single(l => l.DebitCents > 0).DebitCents
 Console.WriteLine("All 40 checks passed.");
 await ImportChecks.Run(db, a, "1.1");
 AmountChecks.Run();
+TransferChecks.Run();
+await ActivityChecks.Run();
 await SessionChecks.Run(path, a, b);
 
 await FeatureChecks.Run();
