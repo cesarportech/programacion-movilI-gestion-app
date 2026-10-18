@@ -18,7 +18,9 @@ Esta versión sube datos; las consultas de la aplicación continúan leyendo SQL
 Una instalación sin contabilidades ya no pide crear un maestro. El usuario escribe el usuario y la contraseña que le asignó el maestro, y la app los valida en la nube, descarga lo que ese usuario puede ver y entra con esos mismos datos. El operador recibe su contabilidad, su propio usuario y sus borradores; el maestro recibe todo. Se conservan las revisiones, así que el siguiente Acumular continúa el mismo historial.
 
 - Se necesita internet en el primer ingreso. El maestro debe haber acumulado antes al usuario y su contabilidad.
-- Nunca se reemplaza un equipo que ya tiene contabilidades, catálogos, partidas o borradores. Un maestro creado por error en una instalación vacía sí se reemplaza.
+- Un equipo vacío se llena con la copia de la nube; un maestro creado por error en una instalación vacía se reemplaza.
+- En un equipo que ya tiene datos, un usuario que todavía no existe aquí se agrega con lo que puede ver (mismo conjunto de datos). Solo se actualizan grupos sin cambios por acumular; si hay cambios pendientes, primero se acumulan. Si los identificadores generados en este equipo coinciden con los de otra contabilidad de la nube, no se combina nada.
+- En una computadora compartida conviene entrar primero con el maestro: recibe a todos los usuarios y contabilidades.
 - Crear un maestro nuevo solo se ofrece cuando la nube no reconoce el usuario, y se pide confirmación (primera instalación de FREDI).
 - Sin conjunto de datos local, la nube identifica el conjunto por el nombre de usuario; debe ser único entre conjuntos.
 

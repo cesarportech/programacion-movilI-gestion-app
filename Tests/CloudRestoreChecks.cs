@@ -47,8 +47,32 @@ internal static class CloudRestoreChecks
         await fresh.AddAccount(a, "3", "Nueva", "");
         var next = (await fresh.PrepareCloudUploads()).Single();
         Check(JsonSerializer.Deserialize<CloudUpload>(next.Payload)!.BaseRevision == cloud.Revision("company:" + a), "next upload continues the cloud revision");
-        try { using var api = new CloudApi(new("https://example.invalid/"), cloud); await fresh.RestoreFromCloud(api, "alpha", Secret); throw new Exception("restore replaced local data"); }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("ya tiene")) { Check(true, "installation with accounting is never replaced"); }
+        try { using var api = new CloudApi(new("https://example.invalid/"), cloud); await fresh.RestoreFromCloud(api, "alpha", Secret); throw new Exception("known user downloaded again"); }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("ya está")) { Check(true, "a user already on this installation is not downloaded again"); }
+
+        // This installation created its own account; its identifier is also used by another company in the cloud.
+        try { using var api = new CloudApi(new("https://example.invalid/"), cloud); await fresh.RestoreFromCloud(api, "bravo", Secret); throw new Exception("colliding identifiers merged"); }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("coinciden"))
+        {
+            await fresh.Login("alpha", Secret);
+            Check((await fresh.Accounts(a)).Count == 3 && (await fresh.PrepareCloudUploads()).Single().Scope == "company:" + a, "colliding identifiers are never merged and local work is kept");
+        }
+
+        // Shared computer: an operator first, then another operator and the master are added to it.
+        var shared = new AppDatabase(NewPath());
+        using (var api = new CloudApi(new("https://example.invalid/"), cloud)) await shared.RestoreFromCloud(api, "alpha", Secret);
+        using (var api = new CloudApi(new("https://example.invalid/"), cloud)) await shared.RestoreFromCloud(api, "bravo", Secret);
+        Check(shared.Session?.Username == "bravo" && (await shared.Accounts(b)).Single().Code == "9", "another operator is added to an installation that has data");
+        await shared.Login("alpha", Secret);
+        await shared.AddAccount(a, "4", "Otra", "");
+        try { using var api = new CloudApi(new("https://example.invalid/"), cloud); await shared.RestoreFromCloud(api, "master", Secret); throw new Exception("unsent change replaced"); }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("sin acumular")) { Check((await shared.Accounts(a)).Count == 3, "master download never replaces unsent changes"); }
+        var pending = (await shared.PrepareCloudUploads()).Single();
+        await shared.AcknowledgeCloudUpload(pending.Scope, pending.RequestId, cloud.Accept(pending));
+        using (var api = new CloudApi(new("https://example.invalid/"), cloud)) await shared.RestoreFromCloud(api, "master", Secret);
+        Check(shared.Session?.IsMaster == true && (await shared.Companies()).Count == 2, "master is added after accumulating");
+        await shared.Login("alpha", Secret);
+        Check((await shared.Accounts(a)).Count == 3 && (await shared.PrepareCloudUploads()).Count == 0, "accumulated work survives the master download");
 
         // A master created by mistake on an empty installation is replaced by the cloud copy.
         var stub = new AppDatabase(NewPath());

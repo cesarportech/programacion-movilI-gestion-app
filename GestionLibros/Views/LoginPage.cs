@@ -11,6 +11,8 @@ public class LoginPage : ContentPage
     private readonly Entry confirm = Field("ConfirmPassword", true);
     private readonly Label hint = Text("Ingrese su usuario y contraseña", 11);
     private readonly Label message = Text("", 11);
+    private readonly Label downloadStatus = Text("", 11);
+    private readonly CloudLoadingOverlay loading;
     private readonly AbsoluteLayout form = new() { BackgroundColor = DialogBlue };
     private readonly VerticalStackLayout dialog = new() { Spacing = 0, WidthRequest = 262 };
     private readonly Button submit = Action("Ok", "login_accept.png");
@@ -49,7 +51,8 @@ public class LoginPage : ContentPage
         dialog.Children.Add(message);
         var border = new Border { Content = dialog, Stroke = Color.FromArgb("#004A72"), StrokeThickness = 1,
             BackgroundColor = DialogBlue, Padding = 0, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
-        Content = new Grid { Children = { border } };
+        loading = new CloudLoadingOverlay(downloadStatus);
+        Content = new Grid { Children = { border, loading } };
         SemanticProperties.SetDescription(username, "Usuario");
         SemanticProperties.SetDescription(password, "Contraseña");
         SemanticProperties.SetDescription(confirm, "Confirmar contraseña");
@@ -117,7 +120,7 @@ public class LoginPage : ContentPage
                 setup = false;
                 await database.Login(username.Text ?? "", password.Text ?? "");
             }
-            else if (await database.CanRestoreFromCloud()) { if (!await SignInNewInstallation()) return; }
+            else if (await database.CanRestoreFromCloud() || !await database.KnowsUser(username.Text ?? "")) { if (!await SignInFromCloud()) return; }
             else await database.Login(username.Text ?? "", password.Text ?? "");
             password.Text = confirm.Text = "";
             await SessionStore.Save(await database.IssueToken());
@@ -132,20 +135,26 @@ public class LoginPage : ContentPage
         }
     }
 
-    // This device has no accounting yet: download the user's data from the cloud. A local master of an
-    // empty installation may still sign in; false means the form switched to creating a new master.
-    private async Task<bool> SignInNewInstallation()
+    // This device has no accounting yet, or not this user: download the user's data from the cloud. A local
+    // master of an empty installation may still sign in; false means the form switched to creating a new master.
+    private async Task<bool> SignInFromCloud()
     {
         var user = username.Text ?? ""; var secret = password.Text ?? "";
-        hint.Text = "Descargando sus datos de la nube…";
+        // The animation needs more room than the compact form; on success it stays until the workspace opens.
+        downloadStatus.Text = $"Descargando las contabilidades de {user.Trim().ToLowerInvariant()}. Solo ocurre la primera vez que entra en este equipo.";
+        loading.Start("Primer ingreso en este equipo");
+        if (Window != null) LoginWindowLayout.Compact(Window, LoadingHeight);
+        var downloaded = false;
         try
         {
             using var api = new CloudApi(CloudConfiguration.Load(CloudSyncDialog.ConfigPath));
             await database.RestoreFromCloud(api, user, secret);
+            downloaded = true;
             return true;
         }
         catch (CloudAuthenticationException ex)
         {
+            HideLoading();
             if (await TryLocalLogin(user, secret)) return true;
             if (!await database.NeedsSetup() || !await DisplayAlertAsync("Instalación nueva",
                 "La nube no reconoce este usuario y contraseña. Si es la primera instalación de FREDI y no la de un usuario ya asignado, puede crear aquí el usuario maestro.",
@@ -156,10 +165,19 @@ public class LoginPage : ContentPage
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
+            HideLoading();
             if (await TryLocalLogin(user, secret)) return true;
-            throw new InvalidOperationException("Este equipo todavía no tiene sus datos. Conéctese a internet para descargarlos en el primer ingreso.");
+            throw new InvalidOperationException("Los datos de este usuario todavía no están en este equipo. Conéctese a internet para descargarlos en su primer ingreso.");
         }
-        finally { LayoutForm(); }
+        finally { if (!downloaded) HideLoading(); }
+    }
+
+    private const double LoadingHeight = 330;
+
+    private void HideLoading()
+    {
+        loading.Stop();
+        LayoutForm();
     }
 
     private async Task<bool> TryLocalLogin(string user, string secret)
@@ -178,6 +196,7 @@ public class LoginPage : ContentPage
 
     private void ShowError(string text)
     {
+        loading.Stop();
         message.Text = text;
         message.HeightRequest = 54;
         message.IsVisible = true;
