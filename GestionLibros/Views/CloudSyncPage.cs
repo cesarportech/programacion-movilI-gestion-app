@@ -15,7 +15,7 @@ internal sealed class CloudSyncDialog : Grid
     private CancellationTokenSource? cancellation;
     private bool closeRequested;
     private bool busy;
-    private static string ConfigPath => Path.Combine(FileSystem.AppDataDirectory, "fredi-api.json");
+    internal static string ConfigPath => Path.Combine(FileSystem.AppDataDirectory, "fredi-api.json");
     public CloudSyncDialog(Page owner, AppDatabase db)
     {
         this.db = db; this.owner = owner; BackgroundColor = Color.FromArgb("#01000000");

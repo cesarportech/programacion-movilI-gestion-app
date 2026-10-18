@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
   try {
     const route = new URL(req.url).pathname.split("/fredi-api/")[1];
     const company = /^v1\/contabilidades\/([1-9][0-9]*)$/.exec(route);
-    const read = !!company || route === "v1/contabilidades" || route === "v1/catalogos";
+    const read = !!company || route === "v1/contabilidades" || route === "v1/catalogos" || route === "v1/restore";
     if (!read && !["v1/auth/login", "v1/auth/logout", "v1/sync", "v1/status"].includes(route)) return reply({ error: "not_found" }, 404);
     if (req.method !== (read ? "GET" : "POST")) return reply({ error: "method_not_allowed" }, 405);
     // Reject oversized streams before JSON parsing. Never log credentials or accounting payloads.
@@ -38,10 +38,12 @@ Deno.serve(async (req: Request) => {
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     const body = size ? JSON.parse(new TextDecoder().decode(bytes)) : {};
     if (route === "v1/auth/login") {
-      if (typeof body.dataset !== "string" || !/^[0-9a-f-]{36}$/i.test(body.dataset) ||
+      // A new installation does not know its dataset yet: without one, the username must be unique in the cloud.
+      const dataset = body.dataset ?? null;
+      if ((dataset !== null && (typeof dataset !== "string" || !/^[0-9a-f-]{36}$/i.test(dataset))) ||
           typeof body.username !== "string" || body.username.length > 60 || typeof body.password !== "string" || body.password.length > 100)
         return reply({ error: "unauthorized" }, 401);
-      const lookup = await rpc("login_lookup", { dataset: body.dataset, username: body.username.trim().toLowerCase(),
+      const lookup = await rpc("login_lookup", { dataset, username: body.username.trim().toLowerCase(),
         ip: await digest(req.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown") });
       if (lookup.error) return result(lookup);
       const user = lookup.user;
@@ -51,13 +53,13 @@ Deno.serve(async (req: Request) => {
       for (let i = 0; i < computed.length; i++) difference |= computed[i] ^ (expected[i] ?? 0);
       if (difference !== 0) return reply({ error: "unauthorized" }, 401);
       const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("");
-      const finished = await rpc("login_finish", { dataset: body.dataset, userId: user.Id, version: user.SecurityVersion, tokenHash: await digest(token) });
+      const finished = await rpc("login_finish", { dataset: lookup.dataset, userId: user.Id, version: user.SecurityVersion, tokenHash: await digest(token) });
       if (finished.error) return result(finished);
-      return reply({ token });
+      return reply({ token, dataset: lookup.dataset });
     }
     const auth = req.headers.get("authorization") ?? "";
     if (!/^Bearer [0-9a-f]{64}$/.test(auth)) return reply({ error: "unauthorized" }, 401);
-    const op = company ? "company" : route === "v1/contabilidades" ? "companies" : route === "v1/catalogos" ? "catalogs" : route === "v1/sync" ? "sync" : route === "v1/status" ? "status" : "logout";
+    const op = company ? "company" : route === "v1/contabilidades" ? "companies" : route === "v1/catalogos" ? "catalogs" : route === "v1/restore" ? "restore" : route === "v1/sync" ? "sync" : route === "v1/status" ? "status" : "logout";
     return result(await rpc(op, { tokenHash: await digest(auth.slice(7)), body, companyId: company ? Number(company[1]) : undefined }));
   } catch {
     return reply({ error: "request_failed" }, 422);

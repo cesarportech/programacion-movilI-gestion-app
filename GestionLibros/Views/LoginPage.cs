@@ -91,7 +91,9 @@ public class LoginPage : ContentPage
         try
         {
             // StartupPage alone resumes remembered tokens. Logout/revocation always shows login.
-            setup = await database.NeedsSetup();
+            // An empty installation still asks for the user's credentials first: a client's data comes from
+            // the cloud. Creating a new master is offered only when the cloud does not know the user.
+            await database.NeedsSetup();
             ready = true;
             LayoutForm();
             submit.IsEnabled = true;
@@ -113,8 +115,10 @@ public class LoginPage : ContentPage
                 if (password.Text != confirm.Text) throw new InvalidOperationException("Las contraseñas no coinciden.");
                 await database.Setup(username.Text ?? "", password.Text ?? "");
                 setup = false;
+                await database.Login(username.Text ?? "", password.Text ?? "");
             }
-            await database.Login(username.Text ?? "", password.Text ?? "");
+            else if (await database.CanRestoreFromCloud()) { if (!await SignInNewInstallation()) return; }
+            else await database.Login(username.Text ?? "", password.Text ?? "");
             password.Text = confirm.Text = "";
             await SessionStore.Save(await database.IssueToken());
             EnterWorkspace();
@@ -126,6 +130,42 @@ public class LoginPage : ContentPage
             busy = false;
             submit.IsEnabled = cancel.IsEnabled = username.IsEnabled = password.IsEnabled = confirm.IsEnabled = true;
         }
+    }
+
+    // This device has no accounting yet: download the user's data from the cloud. A local master of an
+    // empty installation may still sign in; false means the form switched to creating a new master.
+    private async Task<bool> SignInNewInstallation()
+    {
+        var user = username.Text ?? ""; var secret = password.Text ?? "";
+        hint.Text = "Descargando sus datos de la nube…";
+        try
+        {
+            using var api = new CloudApi(CloudConfiguration.Load(CloudSyncDialog.ConfigPath));
+            await database.RestoreFromCloud(api, user, secret);
+            return true;
+        }
+        catch (CloudAuthenticationException ex)
+        {
+            if (await TryLocalLogin(user, secret)) return true;
+            if (!await database.NeedsSetup() || !await DisplayAlertAsync("Instalación nueva",
+                "La nube no reconoce este usuario y contraseña. Si es la primera instalación de FREDI y no la de un usuario ya asignado, puede crear aquí el usuario maestro.",
+                "Crear maestro", "Volver a intentar")) throw new InvalidOperationException(ex.Message);
+            setup = true;
+            confirm.Focus();
+            return false;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            if (await TryLocalLogin(user, secret)) return true;
+            throw new InvalidOperationException("Este equipo todavía no tiene sus datos. Conéctese a internet para descargarlos en el primer ingreso.");
+        }
+        finally { LayoutForm(); }
+    }
+
+    private async Task<bool> TryLocalLogin(string user, string secret)
+    {
+        try { await database.Login(user, secret); return true; }
+        catch (InvalidOperationException) { return false; }
     }
 
     private void EnterWorkspace()

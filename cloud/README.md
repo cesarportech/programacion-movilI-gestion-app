@@ -11,7 +11,16 @@ Proyecto: **VK-FUSSION** (`efekzvmgnicztweluyim`). No es producción.
 
 La carga inicial de octubre de 2026 contiene dos contabilidades, dos paquetes de catálogo, tres usuarios, 630 cuentas, cuatro tipos de póliza, cinco partidas y diez movimientos. Los borradores se respaldan aparte; los tokens locales no salen del dispositivo. Una partida todavía abierta solo se respalda como borrador cuando el mecanismo local de borradores la guarda.
 
-Esta versión sube datos; las consultas de la aplicación continúan leyendo SQLite. Las rutas permiten consultar la copia remota, pero **no se implementa descarga automática ni combinación de escrituras entre computadoras**. Si dos instalaciones parten de la misma copia y modifican una contabilidad, el segundo envío recibe conflicto y queda pendiente. No se deben eliminar las revisiones para forzar una sobrescritura. La reconciliación y el alta de equipos adicionales requieren un procedimiento posterior.
+Esta versión sube datos; las consultas de la aplicación continúan leyendo SQLite. Las rutas permiten consultar la copia remota. **No hay descarga automática ni combinación de escrituras entre computadoras**: solo una instalación nueva descarga sus datos una vez (ver abajo). Si dos instalaciones parten de la misma copia y modifican una contabilidad, el segundo envío recibe conflicto y queda pendiente. No se deben eliminar las revisiones para forzar una sobrescritura. La reconciliación entre equipos que ya tienen datos requiere un procedimiento posterior.
+
+### Equipo nuevo (clientes)
+
+Una instalación sin contabilidades ya no pide crear un maestro. El usuario escribe el usuario y la contraseña que le asignó el maestro, y la app los valida en la nube, descarga lo que ese usuario puede ver y entra con esos mismos datos. El operador recibe su contabilidad, su propio usuario y sus borradores; el maestro recibe todo. Se conservan las revisiones, así que el siguiente Acumular continúa el mismo historial.
+
+- Se necesita internet en el primer ingreso. El maestro debe haber acumulado antes al usuario y su contabilidad.
+- Nunca se reemplaza un equipo que ya tiene contabilidades, catálogos, partidas o borradores. Un maestro creado por error en una instalación vacía sí se reemplaza.
+- Crear un maestro nuevo solo se ofrece cuando la nube no reconoce el usuario, y se pide confirmación (primera instalación de FREDI).
+- Sin conjunto de datos local, la nube identifica el conjunto por el nombre de usuario; debe ser único entre conjuntos.
 
 ## Configuración y rutas
 
@@ -23,15 +32,16 @@ La dirección base se cambia desde **maestro → Acumular → Guardar dirección
 
 | Método | Ruta | Uso |
 |---|---|---|
-| POST | `v1/auth/login` | Dataset, usuario, contraseña → token temporal |
+| POST | `v1/auth/login` | Dataset (opcional en un equipo nuevo), usuario, contraseña → token temporal y dataset |
 | POST | `v1/auth/logout` | Revocar token |
 | POST | `v1/sync` | Enviar un grupo de datos con revisión y UUID de solicitud |
 | POST | `v1/status` | Revisiones visibles para el usuario |
 | GET | `v1/contabilidades` | Contabilidades autorizadas |
 | GET | `v1/contabilidades/{id}` | Registros y revisión de una contabilidad |
 | GET | `v1/catalogos` | Biblioteca de catálogos, solo maestro |
+| GET | `v1/restore` | Copia completa de lo que el usuario puede ver, con revisiones (equipo nuevo) |
 
-Un nuevo servidor requiere desplegar `schema.sql`, la función `fredi-api/index.ts` y provisionar de forma administrativa el conjunto de datos y su maestro. Cambiar la URL no copia la base anterior, no reinicia revisiones y no provisiona credenciales. El servidor nuevo debe implementar el mismo contrato y conservar las revisiones si sustituye al anterior. Las URL deben usar HTTPS y no incluir claves. Se deshabilitan redirecciones HTTP para evitar reenviar credenciales a otro destino.
+Un nuevo servidor requiere desplegar `schema.sql`, después `gateway.sql`, la función `fredi-api/index.ts` y provisionar de forma administrativa el conjunto de datos y su maestro. Cambiar la URL no copia la base anterior, no reinicia revisiones y no provisiona credenciales. El servidor nuevo debe implementar el mismo contrato y conservar las revisiones si sustituye al anterior. Las URL deben usar HTTPS y no incluir claves. Se deshabilitan redirecciones HTTP para evitar reenviar credenciales a otro destino.
 
 ## Persistencia y seguridad
 
@@ -50,7 +60,7 @@ Un nuevo servidor requiere desplegar `schema.sql`, la función `fredi-api/index.
 
 ## Despliegue y validación
 
-`schema.sql` es la fuente reproducible del esquema. Aplicarlo con el mecanismo de migraciones de Supabase en un proyecto vacío. Desplegar `fredi-api/index.ts` con autenticación JWT de plataforma desactivada **solo porque la función implementa la autenticación descrita**. `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` permanecen en el entorno de Edge.
+`schema.sql` es la fuente reproducible de las tablas. Aplicarlo con el mecanismo de migraciones de Supabase en un proyecto vacío. `gateway.sql` contiene la función `fredi_gateway`: es idempotente y para actualizarla basta ejecutarlo otra vez en el editor SQL. Actualice primero `gateway.sql` y luego la función Edge. Desplegar `fredi-api/index.ts` con autenticación JWT de plataforma desactivada **solo porque la función implementa la autenticación descrita**. `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` permanecen en el entorno de Edge.
 
 `Tests/CloudSyncChecks.cs` comprueba persistencia de pendientes, reintentos, aislamiento, eliminaciones, rollback, cambios concurrentes y conflictos HTTP. `cloud/integration_checks.py` prueba el API real con un dataset sintético y una semilla administrativa separada. No usar los scripts de bootstrap para un servidor que ya tiene datos.
 
