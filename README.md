@@ -74,6 +74,20 @@ El script usa el SDK .NET 10 local de .tools, cierra la copia de FREDI que esté
 .\.tools\dotnet\dotnet.exe run --project Tests/Fredi.Checks.csproj
 ```
 
+### Paquete para clientes
+
+`Compilar-Fredi.ps1` genera una compilación Debug que necesita el runtime de .NET 10 instalado; no sirve para entregar. Para los equipos de clientes, con FREDI cerrado:
+
+```powershell
+.\Publicar-Fredi.ps1
+```
+
+Publica `net10.0-windows10.0.19041.0` en Release para win-x64, autocontenido (`SelfContained` y `WindowsAppSDKSelfContained`): incluye .NET (coreclr, hostfxr) y Windows App SDK, por lo que el cliente no necesita instalar nada. Igual que `Compilar-Fredi.ps1`, se detiene si FREDI está abierto y usa `.tools\dotnet` si existe. La salida queda en `publicar\FREDI` (se borra y regenera en cada ejecución; está excluida de git). Se entrega la carpeta completa, por ejemplo comprimida en ZIP; el cliente la descomprime y abre `GestionLibros.exe`. El exe solo no funciona.
+
+Los datos siguen en la misma ruta que la compilación de desarrollo (`%LOCALAPPDATA%\User Name\com.fredi.contabilidad\Data\fredi-pruebas-v1.db3`), así que reemplazar la carpeta del programa por una versión nueva no borra la base del equipo.
+
+**Firma:** el exe y las DLL no están firmados. Smart App Control o SmartScreen pueden bloquearlo o mostrar "Windows protegió su PC" en el equipo del cliente; en el equipo de desarrollo Smart App Control ya bloqueó una DLL de pruebas recién compilada en Debug y también bloqueó el `publicar\FREDI\GestionLibros.exe` generado por este script ("An Application Control policy has blocked this file"; evento 3077 de CodeIntegrity, política de Smart App Control), aunque la compilación Debug de bin-maestro sí abre. Por eso el arranque del paquete en un entorno sin `DOTNET_ROOT` no se ha podido comprobar en este equipo: queda pendiente probarlo en un equipo sin Smart App Control activo o después de firmar. La salida sí contiene coreclr.dll, hostfxr.dll y hostpolicy.dll, y `GestionLibros.runtimeconfig.json` declara `includedFrameworks` (Microsoft.NETCore.App incluido) en lugar de pedir un .NET instalado. En equipos de clientes con Smart App Control activo el paquete sin firma probablemente será bloqueado igual. Siguiente paso recomendado (no implementado): firmar con un certificado de firma de código y/o distribuir con un instalador firmado (Inno Setup o MSIX).
+
 ## Verificación
 
 Compilación Windows .NET 10: 0 errores y 0 advertencias. Comprobaciones automatizadas de autenticación, aislamiento, persistencia, validaciones de pólizas, jerarquía, exactitud de saldos, edición y borrado. Las pruebas usan una base sintética temporal, nunca la base de la aplicación. La inspección visual remota está limitada por fallos de captura del escritorio.

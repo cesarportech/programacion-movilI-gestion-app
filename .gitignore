@@ -435,3 +435,6 @@ FodyWeavers.xsd
 
 # Any build output folder (bin, bin-detalles, "bin-x 2Debug", ...)
 **/[Bb]in*/
+
+# Paquete para clientes (Publicar-Fredi.ps1)
+publicar/
